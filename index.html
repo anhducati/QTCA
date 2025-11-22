@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <title>Vòng Quay May Mắn - Chung Anh</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      /* NỀN SÁNG */
+      background: linear-gradient(135deg, #ffffff, #fff0c9);
+      color: #0f172a;
+    }
+
+    .wheel-wrapper {
+      text-align: center;
+    }
+
+    .wheel-container {
+      position: relative;
+      width: 420px;
+      height: 420px;
+      margin: 0 auto 24px auto;
+    }
+
+    /* Vòng quay */
+    #wheel {
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      border: 8px solid #e5e7eb;
+      box-shadow: 0 0 30px rgba(15,23,42,0.8);
+      background: #020617;
+      transition: transform 4s cubic-bezier(0.15, 0.75, 0.25, 1);
+    }
+
+    /* Mũi tên nổi trên mép vòng, chĩa xuống vòng */
+    .pointer {
+        position: absolute;
+        top: -10px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 0;
+        height: 0;
+
+        /* MŨI TÊN NHỌN LÊN TRÊN */
+        border-left: 20px solid transparent;
+        border-right: 20px solid transparent;
+        border-top: 30px solid #facc15;
+
+        filter: drop-shadow(0 0 8px #fbbf24);
+        z-index: 999; /* LUÔN nằm trên canvas */
+    }
+
+    .center-circle {
+      position: absolute;
+      width: 80px;
+      height: 80px;
+      background: #facc15;
+      border-radius: 50%;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #1f2937;
+      font-weight: 700;
+      font-size: 18px;
+      box-shadow: 0 0 18px rgba(250, 204, 21, 0.8);
+      text-align: center;
+      padding: 6px;
+      pointer-events: none;
+    }
+
+    button#spinBtn {
+      padding: 10px 24px;
+      border-radius: 999px;
+      border: none;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      background: linear-gradient(135deg, #22c55e, #16a34a);
+      color: white;
+      box-shadow: 0 10px 20px rgba(34,197,94,0.35);
+      transition: transform 0.15s, box-shadow 0.15s, filter 0.15s;
+    }
+
+    button#spinBtn:hover:enabled {
+      transform: translateY(-1px);
+      filter: brightness(1.03);
+      box-shadow: 0 14px 30px rgba(34,197,94,0.45);
+    }
+
+    button#spinBtn:active:enabled {
+      transform: translateY(1px) scale(0.98);
+      box-shadow: 0 6px 14px rgba(34,197,94,0.3);
+    }
+
+    button#spinBtn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
+    .result {
+      margin-top: 16px;
+      font-size: 18px;
+      min-height: 26px;
+    }
+
+    .result span {
+      font-weight: 700;
+      color: #eab308;
+    }
+
+    .title {
+      font-size: 24px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+
+    .subtitle {
+      font-size: 14px;
+      color: #6b7280;
+      margin-bottom: 20px;
+    }
+
+    .note-left {
+      margin-top: 8px;
+      font-size: 13px;
+      color: #6b7280;
+    }
+
+    @media (max-width: 480px) {
+      .wheel-container {
+        width: 320px;
+        height: 320px;
+      }
+    }
+
+    /* ===== POPUP & PHÁO HOA ===== */
+    .hidden {
+      display: none !important;
+    }
+
+    /* Overlay nền trắng */
+    #winnerOverlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(255,255,255,0.9);
+      backdrop-filter: blur(2px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 2000;
+      animation: fadeInOverlay 0.3s ease-out;
+    }
+
+    @keyframes fadeInOverlay {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+
+    #fwCanvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Hộp thoại to hơn, tông trắng */
+    .winner-box {
+      position: relative;
+      background: #ffffff;
+      border-radius: 28px;
+      padding: 40px 36px 32px;
+      text-align: center;
+      min-width: 360px;
+      max-width: 520px;
+      border: 2px solid rgba(15,23,42,0.08);
+      box-shadow: 0 28px 70px rgba(0,0,0,0.25);
+      z-index: 10;
+      animation: scaleIn 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+      color: #0f172a;
+    }
+
+    @keyframes scaleIn {
+      from {
+        transform: scale(0.7) translateY(20px);
+        opacity: 0;
+      }
+      to {
+        transform: scale(1) translateY(0);
+        opacity: 1;
+      }
+    }
+
+    .winner-title {
+      font-size: 32px;
+      font-weight: 900;
+      color: #dc2626;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+
+    .winner-sub {
+      font-size: 16px;
+      color: #4b5563;
+      margin-bottom: 18px;
+    }
+
+    .winner-prize {
+      font-size: 26px;
+      font-weight: 900;
+      color: #16a34a;
+      margin-bottom: 26px;
+    }
+
+    .winner-close {
+      padding: 12px 26px;
+      border-radius: 999px;
+      border: none;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      background: linear-gradient(135deg, #0ea5e9, #2563eb);
+      color: white;
+      box-shadow: 0 16px 28px rgba(37,99,235,0.35);
+    }
+  </style>
+</head>
+<body>
+  <div class="wheel-wrapper">
+    <div class="title">Vòng Quay May Mắn</div>
+    <div class="subtitle">Nhấn QUAY &amp; chờ kết quả…</div>
+
+    <div class="wheel-container">
+      <div class="pointer"></div>
+      <canvas id="wheel"></canvas>
+      <div class="center-circle">QUAY</div>
+    </div>
+
+    <button id="spinBtn">🎰 QUAY NGAY</button>
+    <div class="result" id="resultText"></div>
+    <div class="note-left">
+      Cấu hình quà: <code>gt.html</code> –
+      Ăn gian: <code>ctrl.html</code>
+    </div>
+  </div>
+
+  <!-- POPUP TRÚNG THƯỞNG + PHÁO HOA -->
+  <div id="winnerOverlay" class="hidden">
+    <canvas id="fwCanvas"></canvas>
+    <div class="winner-box">
+      <div class="winner-title">KẾT QUẢ</div>
+      <div class="winner-sub">Bạn nhận được:</div>
+      <div class="winner-prize" id="winnerPrize"></div>
+      <button class="winner-close" id="winnerCloseBtn">Đóng</button>
+    </div>
+  </div>
+
+  <script>
+    const PRIZE_KEY = "wheel_prize_config_v1";
+    const CTRL_KEY  = "wheel_ctrl_config_v1";
+
+    const wheelCanvas = document.getElementById("wheel");
+    const ctx = wheelCanvas.getContext("2d");
+    const spinBtn = document.getElementById("spinBtn");
+    const resultText = document.getElementById("resultText");
+    const centerCircle = document.querySelector(".center-circle");
+    const wheelElement = document.getElementById("wheel");
+
+    const overlay = document.getElementById("winnerOverlay");
+    const winnerPrizeEl = document.getElementById("winnerPrize");
+    const closeBtn = document.getElementById("winnerCloseBtn");
+    const fwCanvas = document.getElementById("fwCanvas");
+    const fwCtx = fwCanvas.getContext("2d");
+
+    let prizeState = [];  // { name, total, remaining }
+    let prizes = [];      // mảng tên
+    let ctrlConfig = {
+      mode: "normal",
+      forceIndex: 0,
+      weights: [],
+      hotkeys: []
+    };
+
+    let fwWidth = 0, fwHeight = 0;
+    let fwAnimationId = null;
+    let fireworks = [];
+    let particles = [];
+    let popupTimeoutId = null;
+    let isSpinning = false;
+    let totalRotation = 0; // deg
+    let lastHotkeyIndex = null; // dùng cho mode hotkey
+
+    // ====== LOAD CONFIG ======
+    function loadPrizeConfig() {
+      const raw = localStorage.getItem(PRIZE_KEY);
+      if (!raw) return null;
+      try {
+        const data = JSON.parse(raw);
+        if (!data || !Array.isArray(data.prizes) || !data.prizes.length) return null;
+        const arr = data.prizes
+          .map(p => {
+            const name = (p.name || "").trim();
+            const total = parseInt(p.total, 10);
+            let remaining = parseInt(p.remaining, 10);
+            if (!Number.isFinite(remaining)) {
+              remaining = Number.isFinite(total) ? total : 0;
+            }
+            return {
+              name,
+              total: Number.isFinite(total) ? total : 0,
+              remaining: Number.isFinite(remaining) ? remaining : 0
+            };
+          })
+          .filter(p => p.name !== "");
+        return arr.length ? arr : null;
+      } catch(e) {
+        console.warn("Lỗi đọc cấu hình quà:", e);
+        return null;
+      }
+    }
+
+    function loadCtrlConfig() {
+      const raw = localStorage.getItem(CTRL_KEY);
+      if (!raw) return;
+      try {
+        const d = JSON.parse(raw);
+        if (!d || typeof d !== "object") return;
+        ctrlConfig.mode = d.mode || "normal";
+        ctrlConfig.forceIndex = Number.isInteger(d.forceIndex) ? d.forceIndex : 0;
+        ctrlConfig.weights = Array.isArray(d.weights) ? d.weights : [];
+        ctrlConfig.hotkeys = Array.isArray(d.hotkeys) ? d.hotkeys : [];
+      } catch(e) {
+        console.warn("Lỗi đọc ctrl config:", e);
+      }
+    }
+
+    // ====== CANVAS VÒNG QUAY ======
+    function resizeCanvas() {
+      const parent = wheelCanvas.parentElement;
+      const size = parent.clientWidth;
+      wheelCanvas.width = size;
+      wheelCanvas.height = size;
+      drawWheel();
+    }
+
+    function drawWheel() {
+      const size = wheelCanvas.width;
+      const radius = size / 2;
+      const cx = radius;
+      const cy = radius;
+      const count = prizes.length || 1;
+      const step = (2 * Math.PI) / count;
+
+      ctx.clearRect(0, 0, size, size);
+
+      for (let i = 0; i < count; i++) {
+        const start = i * step;
+        const end = start + step;
+
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, radius - 4, start, end);
+        ctx.closePath();
+        ctx.fillStyle = i % 2 === 0 ? "#0ea5e9" : "#6366f1";
+        ctx.fill();
+        ctx.strokeStyle = "#020617";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.save();
+        ctx.translate(cx, cy);
+        const angle = start + step / 2;
+        ctx.rotate(angle);
+        ctx.textAlign = "right";
+        ctx.fillStyle = "#f9fafb";
+        ctx.font = `${Math.max(12, radius / 12)}px system-ui`;
+        ctx.fillText(prizes[i] || "", radius - 20, 4);
+        ctx.restore();
+      }
+    }
+
+    window.addEventListener("resize", () => {
+      resizeCanvas();
+      resizeFireworks();
+    });
+
+    // ====== CHỌN INDEX THEO CTRL MODE ======
+    function chooseTargetIndex() {
+      const count = prizes.length;
+      if (!count) return 0;
+
+      const mode = ctrlConfig.mode || "normal";
+
+      // 1) FORCE MODE: luôn ép trúng forceIndex nếu hợp lệ
+      if (mode === "force") {
+        const idx = ctrlConfig.forceIndex;
+        if (Number.isInteger(idx) && idx >= 0 && idx < count) {
+          return idx;
+        }
+      }
+
+      // 2) WEIGHTED MODE: random theo weight
+      if (mode === "weighted") {
+        const rawWeights = ctrlConfig.weights || [];
+        const weights = [];
+        for (let i = 0; i < count; i++) {
+          const w = parseFloat(rawWeights[i]) || 0;
+          weights.push(Math.max(0, w));
+        }
+        const sum = weights.reduce((a,b) => a + b, 0);
+        if (sum > 0) {
+          let r = Math.random() * sum;
+          for (let i = 0; i < count; i++) {
+            if (r < weights[i]) {
+              return i;
+            }
+            r -= weights[i];
+          }
+          return count - 1;
+        }
+      }
+
+      // 3) HOTKEY MODE: nếu có lastHotkeyIndex thì ưu tiên
+      if (mode === "hotkey") {
+        if (Number.isInteger(lastHotkeyIndex) &&
+            lastHotkeyIndex >= 0 &&
+            lastHotkeyIndex < count) {
+          const idx = lastHotkeyIndex;
+          lastHotkeyIndex = null; // dùng xong reset
+          return idx;
+        }
+      }
+
+      // 4) NORMAL hoặc fallback: random đều
+      return Math.floor(Math.random() * count);
+    }
+
+    // Lắng nghe phím bí mật, để dùng cho mode hotkey:
+    window.addEventListener("keydown", (e) => {
+      if (!ctrlConfig.hotkeys || !ctrlConfig.hotkeys.length) return;
+      const keyPressed = e.key.toUpperCase();
+      const match = ctrlConfig.hotkeys.find(h =>
+        (h.key || "").toUpperCase() === keyPressed
+      );
+      if (match && Number.isInteger(match.index)) {
+        lastHotkeyIndex = match.index;
+        // console.log("HOTKEY chọn index:", lastHotkeyIndex);
+      }
+    });
+
+    // ====== QUAY VÒNG (có điều khiển index) ======
+    function spin() {
+      if (isSpinning) return;
+
+      const anyLimitedLeft = prizeState.some(p => p.total > 0 && p.remaining > 0);
+      const anyUnlimited = prizeState.some(p => p.total <= 0);
+      if (!anyLimitedLeft && !anyUnlimited) {
+        alert("Đã hết toàn bộ quà tặng!");
+        return;
+      }
+
+      isSpinning = true;
+      spinBtn.disabled = true;
+      resultText.textContent = "Đang quay...";
+      centerCircle.textContent = "ĐANG QUAY";
+      centerCircle.style.fontSize = "14px";
+
+      if (popupTimeoutId) {
+        clearTimeout(popupTimeoutId);
+        popupTimeoutId = null;
+      }
+
+      const count = prizes.length;
+      const stepDeg = 360 / count;
+
+      // Chọn index trúng dựa trên ctrlConfig
+      const targetIndex = chooseTargetIndex();
+
+      // Góc giữa của segment targetIndex theo hệ pickedAngleDeg
+      const pickedAngle = targetIndex * stepDeg + stepDeg / 2;
+
+      // Theo công thức: pickedAngleDeg = 270 - normalized
+      // => normalized_target = 270 - pickedAngle
+      let normalizedTarget = 270 - pickedAngle;
+      normalizedTarget = ((normalizedTarget % 360) + 360) % 360;
+
+      const currentNorm = ((totalRotation % 360) + 360) % 360;
+      const delta = ((normalizedTarget - currentNorm) + 360) % 360;
+
+      const spins = 5 + Math.floor(Math.random() * 4); // 5–8 vòng
+      const spinDeg = spins * 360 + delta;
+
+      totalRotation += spinDeg;
+
+      wheelElement.style.transition = "transform 4s cubic-bezier(0.15, 0.75, 0.25, 1)";
+      wheelElement.style.transform = `rotate(${totalRotation}deg)`;
+    }
+
+    // ===== FIREWORKS =====
+    function resizeFireworks() {
+      fwWidth = fwCanvas.width = window.innerWidth;
+      fwHeight = fwCanvas.height = window.innerHeight;
+    }
+
+    function rand(min, max) {
+      return Math.random() * (max - min) + min;
+    }
+
+    function createFirework() {
+      fireworks.push({
+        x: rand(fwWidth * 0.1, fwWidth * 0.9),
+        y: fwHeight,
+        targetY: rand(fwHeight * 0.2, fwHeight * 0.5),
+        speed: rand(7, 10),
+        color: `hsl(${Math.floor(rand(0, 360))}, 100%, 60%)`,
+        exploded: false
+      });
+    }
+
+    function createParticles(x, y, color) {
+      const count = 40;
+      for (let i = 0; i < count; i++) {
+        const angle = rand(0, Math.PI * 2);
+        const speed = rand(2, 6);
+        particles.push({
+          x,
+          y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          alpha: 1,
+          color
+        });
+      }
+    }
+
+    function fireworksLoop() {
+      fwAnimationId = requestAnimationFrame(fireworksLoop);
+      // NỀN PHÁO HOA SÁNG HƠN
+      fwCtx.fillStyle = "rgba(255,255,255,0.3)";
+      fwCtx.fillRect(0, 0, fwWidth, fwHeight);
+
+      if (fireworks.length < 5) {
+        createFirework();
+      }
+
+      fireworks.forEach((f, idx) => {
+        if (!f.exploded) {
+          f.y -= f.speed;
+          fwCtx.beginPath();
+          fwCtx.arc(f.x, f.y, 2, 0, Math.PI * 2);
+          fwCtx.fillStyle = f.color;
+          fwCtx.fill();
+
+          if (f.y <= f.targetY) {
+            f.exploded = true;
+            createParticles(f.x, f.y, f.color);
+          }
+        } else {
+          fireworks.splice(idx, 1);
+        }
+      });
+
+      particles.forEach((p, idx) => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.05;
+        p.alpha -= 0.015;
+
+        if (p.alpha <= 0) {
+          particles.splice(idx, 1);
+          return;
+        }
+
+        fwCtx.globalAlpha = p.alpha;
+        fwCtx.beginPath();
+        fwCtx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
+        fwCtx.fillStyle = p.color;
+        fwCtx.fill();
+        fwCtx.globalAlpha = 1;
+      });
+    }
+
+    function startFireworks() {
+      resizeFireworks();
+      fireworks = [];
+      particles = [];
+      if (fwAnimationId) cancelAnimationFrame(fwAnimationId);
+      fireworksLoop();
+    }
+
+    function stopFireworks() {
+      if (fwAnimationId) cancelAnimationFrame(fwAnimationId);
+      fwCtx.clearRect(0, 0, fwWidth, fwHeight);
+      fireworks = [];
+      particles = [];
+    }
+
+    function showWinPopup(prizeText) {
+      winnerPrizeEl.textContent = prizeText;
+      overlay.classList.remove("hidden");
+      startFireworks();
+    }
+
+    function hideWinPopup() {
+      overlay.classList.add("hidden");
+      stopFireworks();
+    }
+
+    closeBtn.addEventListener("click", hideWinPopup);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) hideWinPopup();
+    });
+
+    // ===== XỬ LÝ KHI QUAY XONG =====
+    function handleSpinEnd() {
+      const count = prizes.length;
+      const stepDeg = 360 / count;
+
+      const normalized = ((totalRotation % 360) + 360) % 360;
+      let pickedAngleDeg = 270 - normalized;
+      pickedAngleDeg = ((pickedAngleDeg % 360) + 360) % 360;
+
+      const index = Math.floor(pickedAngleDeg / stepDeg);
+
+      // Tính kết quả như cũ (trừ số lượng nếu có giới hạn)
+      let displayText = "Chúc May Mắn Lần Sau";
+      let labelForCenter = displayText;
+
+      const item = prizeState[index];
+      if (item) {
+        if (item.total > 0) {
+          if (item.remaining > 0) {
+            item.remaining -= 1;
+            displayText = item.name;
+            labelForCenter = item.name;
+          } else {
+            displayText = "Chúc May Mắn Lần Sau (Hết " + item.name + ")";
+            labelForCenter = "Chúc May Mắn\nLần Sau";
+          }
+        } else {
+          displayText = item.name;
+          labelForCenter = item.name;
+        }
+      }
+
+      // Lưu lại số còn lại
+      try {
+        localStorage.setItem(PRIZE_KEY, JSON.stringify({ prizes: prizeState }));
+      } catch(e) {
+        console.warn("Không lưu được cấu hình quà:", e);
+      }
+
+      // Hiển thị kết quả dưới nút
+      resultText.innerHTML = `Kết quả: <span>${displayText}</span>`;
+      centerCircle.textContent = labelForCenter;
+      centerCircle.style.fontSize =
+        labelForCenter.length > 16 ? "12px" : "16px";
+
+      // GIẢI NÀO CŨNG CÓ POPUP (KỂ CẢ "CHÚC MAY MẮN...")
+      const delayMs = 2000; // 2 giây
+      popupTimeoutId = setTimeout(() => {
+        showWinPopup(displayText);
+      }, delayMs);
+
+      isSpinning = false;
+      spinBtn.disabled = false;
+    }
+
+    spinBtn.addEventListener("click", spin);
+    wheelElement.addEventListener("transitionend", handleSpinEnd);
+
+    // ===== INIT =====
+    function init() {
+      const cfg = loadPrizeConfig();
+      if (!cfg) {
+        // Nếu chưa có cấu hình, tạo mặc định giống trước
+        prizeState = [
+          { name: "Giảm 50k",             total: 0, remaining: 0 },
+          { name: "Giảm 100k",            total: 0, remaining: 0 },
+          { name: "Quà Tặng Áo Mưa",      total: 0, remaining: 0 },
+          { name: "Bình Dầu Miễn Phí",    total: 0, remaining: 0 },
+          { name: "Rửa Xe Free",          total: 0, remaining: 0 },
+          { name: "Phiếu Bốc Thăm",       total: 0, remaining: 0 },
+          { name: "Thêm 1 Lần Quay",      total: 0, remaining: 0 },
+          { name: "Chúc May Mắn Lần Sau", total: 0, remaining: 0 }
+        ];
+      } else {
+        prizeState = cfg;
+      }
+      prizes = prizeState.map(p => p.name);
+
+      loadCtrlConfig();
+      resizeCanvas();
+      resizeFireworks();
+    }
+
+    init();
+  </script>
+</body>
+</html>

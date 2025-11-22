@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <title>Điều Khiển Vòng Quay - Ăn Gian Pro (Trắng)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+  />
+  <style>
+    body {
+      background: #f8fafc;
+      color: #0f172a;
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 24px 12px;
+    }
+    .card {
+      background: #ffffff;
+      border-radius: 20px;
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 18px 40px rgba(15,23,42,0.12);
+      max-width: 1100px;
+      width: 100%;
+    }
+    .card-header {
+      border-bottom: 1px solid #e2e8f0;
+      background: #f1f5f9;
+    }
+    .badge-soft {
+      background: rgba(56,189,248,0.14);
+      color: #0284c7;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 12px;
+    }
+    .section-title {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      color: #94a3b8;
+      margin-bottom: 6px;
+    }
+    .section-box {
+      border-radius: 16px;
+      border: 1px solid #e2e8f0;
+      background: #ffffff;
+      padding: 14px 14px 10px;
+      margin-bottom: 14px;
+    }
+    .text-muted {
+      color: #64748b !important;
+    }
+    .form-control, .form-select {
+      background-color: #ffffff;
+      border-color: #cbd5e1;
+      color: #0f172a;
+    }
+    .form-control:focus, .form-select:focus {
+      background-color: #ffffff;
+      border-color: #60a5fa;
+      color: #0f172a;
+      box-shadow: 0 0 0 .1rem rgba(96,165,250,.35);
+    }
+    .table thead th {
+      background: #f8fafc;
+      border-bottom-color: #e2e8f0;
+      font-size: 13px;
+      color: #64748b;
+    }
+    .table tbody td {
+      font-size: 13px;
+      vertical-align: middle;
+    }
+    .pill {
+      border-radius: 999px;
+      padding: 3px 10px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+    }
+    .pill-green { background: rgba(34,197,94,0.10); color:#15803d; }
+    .pill-blue { background: rgba(59,130,246,0.10); color:#1d4ed8; }
+    .pill-yellow { background: rgba(234,179,8,0.10); color:#b45309; }
+    code {
+      color: #b45309;
+      font-size: 12px;
+      background: #fefce8;
+      padding: 1px 4px;
+      border-radius: 4px;
+    }
+    a, a:hover {
+      color: #0ea5e9;
+    }
+    @media (max-width: 992px) {
+      .card {
+        box-shadow: 0 10px 24px rgba(15,23,42,0.10);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <div>
+        <h5 class="mb-1">Bảng Điều Khiển Vòng Quay – Ăn Gian</h5>
+        <div class="text-muted small">
+          Trang này chỉ mình biết 😈 – cấu hình cách vòng quay chọn giải từ <code>index.html</code>.
+        </div>
+      </div>
+      <span class="badge-soft">localStorage: <code>wheel_ctrl_config_v1</code></span>
+    </div>
+
+    <div class="card-body">
+      <!-- THÔNG TIN GIẢI -->
+      <div class="mb-3 section-box">
+        <div class="d-flex justify-content-between align-items-center mb-1">
+          <div class="section-title mb-0">Danh sách giải hiện tại</div>
+          <span class="pill pill-blue" id="prizeCountBadge">0 giải</span>
+        </div>
+        <div class="small text-muted mb-2">
+          Lấy từ cấu hình quà <code>gt.html</code> (localStorage: <code>wheel_prize_config_v1</code>).  
+          Mỗi dòng tương ứng với 1 ô trên vòng quay.
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th style="width:6%">#</th>
+                <th style="width:46%">Tên giải</th>
+                <th style="width:16%">Tổng SL</th>
+                <th style="width:16%">Còn lại</th>
+                <th style="width:16%">Index trong code</th>
+              </tr>
+            </thead>
+            <tbody id="prizeTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="row">
+        <!-- CỘT TRÁI: CHẾ ĐỘ ĂN GIAN -->
+        <div class="col-lg-6">
+          <div class="section-box">
+            <div class="section-title">Chế độ điều khiển</div>
+            <div class="small text-muted mb-2">
+              Chọn cách vòng quay xác định ô trúng. Nếu <b>Bình thường</b> → quay ngẫu nhiên như không ăn gian.
+            </div>
+
+            <div class="form-check mb-1">
+              <input class="form-check-input" type="radio" name="modeRadios" id="modeNormal" value="normal" checked />
+              <label class="form-check-label" for="modeNormal">
+                Bình thường (random chuẩn)
+              </label>
+            </div>
+
+            <div class="form-check mb-1">
+              <input class="form-check-input" type="radio" name="modeRadios" id="modeForce" value="force" />
+              <label class="form-check-label" for="modeForce">
+                Ép trúng <b>một giải cố định</b> (luôn trúng đúng giải đã chọn)
+              </label>
+            </div>
+
+            <div class="form-check mb-1">
+              <input class="form-check-input" type="radio" name="modeRadios" id="modeWeighted" value="weighted" />
+              <label class="form-check-label" for="modeWeighted">
+                Quay theo <b>tỉ lệ trúng</b> từng giải (giải nào nặng hơn → dễ ra hơn)
+              </label>
+            </div>
+
+            <div class="form-check mb-1">
+              <input class="form-check-input" type="radio" name="modeRadios" id="modeHotkey" value="hotkey" />
+              <label class="form-check-label" for="modeHotkey">
+                Dùng <b>phím bí mật</b> trong lúc quay để ép trúng giải (ví dụ bấm phím số)
+              </label>
+            </div>
+          </div>
+
+          <!-- FORCE MODE -->
+          <div class="section-box" id="forceBox">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <div class="section-title mb-0">Ép trúng giải cố định</div>
+              <span class="pill pill-green">Mode: force</span>
+            </div>
+            <div class="small text-muted mb-2">
+              Mọi lượt quay sẽ rơi vào đúng giải được chọn bên dưới (trừ khi sau này code ưu tiên hotkey).
+            </div>
+            <div class="mb-2">
+              <label for="forcePrizeSelect" class="form-label form-label-sm mb-1">Chọn giải muốn ép trúng</label>
+              <select id="forcePrizeSelect" class="form-select form-select-sm">
+                <!-- render bằng JS -->
+              </select>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- CỘT PHẢI: TỈ LỆ & HOTKEY -->
+        <div class="col-lg-6">
+          <!-- WEIGHTED MODE -->
+          <div class="section-box" id="weightedBox">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <div class="section-title mb-0">Tỉ lệ trúng từng giải</div>
+              <span class="pill pill-yellow">Mode: weighted</span>
+            </div>
+            <div class="small text-muted mb-2">
+              Nhập <b>điểm nặng (weight)</b> cho từng giải. Hệ thống sẽ tự tính tỉ lệ = weight / tổng weight.  
+              Ví dụ: 50 - 30 - 10 - 10 nghĩa là giải 1 chiếm 50% cơ hội.
+            </div>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th style="width:6%">#</th>
+                    <th style="width:44%">Giải</th>
+                    <th style="width:25%">Weight</th>
+                    <th style="width:25%">Tỉ lệ ~%</th>
+                  </tr>
+                </thead>
+                <tbody id="weightTableBody"></tbody>
+              </table>
+            </div>
+            <div class="mt-1 small text-muted">
+              Tổng weight: <span id="totalWeight">0</span> – Tỉ lệ chỉ mang tính tương đối, không cần đúng 100%.
+            </div>
+          </div>
+
+          <!-- HOTKEY MODE -->
+          <div class="section-box" id="hotkeyBox">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <div class="section-title mb-0">Phím bí mật (hotkey)</div>
+              <span class="pill pill-blue">Mode: hotkey</span>
+            </div>
+            <div class="small text-muted mb-2">
+              Trong lúc vòng đang quay, nếu bạn giữ <b>phím bí mật</b> thì vòng sẽ bị ép trúng vào giải tương ứng
+              (đã cấu hình trong bảng dưới).
+            </div>
+
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th style="width:20%">Phím</th>
+                    <th style="width:50%">Ép trúng giải</th>
+                    <th style="width:30%">Ghi chú</th>
+                  </tr>
+                </thead>
+                <tbody id="hotkeyTableBody"></tbody>
+              </table>
+            </div>
+            <div class="small text-muted mt-1">
+              Gợi ý: dùng các phím <b>1–9</b> hoặc <b>Q, W, E...</b> tùy bạn.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <hr />
+
+      <div class="d-flex flex-wrap gap-2">
+        <button class="btn btn-success" id="btnSave">
+          💾 Lưu cấu hình điều khiển
+        </button>
+        <button class="btn btn-outline-secondary btn-sm" id="btnReload">
+          ⟳ Nạp lại từ localStorage
+        </button>
+        <button class="btn btn-outline-warning btn-sm" id="btnResetDefault">
+          ⚠ Đưa về chế độ Bình thường
+        </button>
+        <button class="btn btn-outline-danger btn-sm ms-auto" id="btnClearCtrl">
+          🗑 Xóa cấu hình điều khiển
+        </button>
+      </div>
+
+      <div class="mt-3 small text-muted">
+        • Cấu hình điều khiển này lưu ở: <code>wheel_ctrl_config_v1</code>.  
+        • Vòng quay trong <code>index.html</code> đã được mình chỉnh để đọc & áp dụng:
+        <code>mode</code>, <code>forceIndex</code>, <code>weights[]</code>, <code>hotkeys[]</code>.  
+        • Bạn chỉ cần mở trang này, chỉnh → bấm <b>Lưu cấu hình điều khiển</b> là xong.
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const PRIZE_KEY = "wheel_prize_config_v1";
+    const CTRL_KEY  = "wheel_ctrl_config_v1";
+
+    const prizeTableBody = document.getElementById("prizeTableBody");
+    const prizeCountBadge = document.getElementById("prizeCountBadge");
+    const forcePrizeSelect = document.getElementById("forcePrizeSelect");
+    const weightTableBody = document.getElementById("weightTableBody");
+    const hotkeyTableBody = document.getElementById("hotkeyTableBody");
+    const totalWeightSpan = document.getElementById("totalWeight");
+
+    const modeRadios = document.querySelectorAll("input[name='modeRadios']");
+    const btnSave = document.getElementById("btnSave");
+    const btnReload = document.getElementById("btnReload");
+    const btnResetDefault = document.getElementById("btnResetDefault");
+    const btnClearCtrl = document.getElementById("btnClearCtrl");
+
+    const forceBox = document.getElementById("forceBox");
+    const weightedBox = document.getElementById("weightedBox");
+    const hotkeyBox = document.getElementById("hotkeyBox");
+
+    let prizes = [];     // { name, total, remaining }
+    let ctrlConfig = {}; // { mode, forceIndex, weights[], hotkeys[] }
+
+    // ----- UTIL -----
+    function loadPrizeConfig() {
+      const raw = localStorage.getItem(PRIZE_KEY);
+      if (!raw) return null;
+      try {
+        const data = JSON.parse(raw);
+        if (!data || !Array.isArray(data.prizes)) return null;
+        return data.prizes.map(p => ({
+          name: (p.name || "").trim(),
+          total: Number.isFinite(parseInt(p.total, 10)) ? parseInt(p.total, 10) : 0,
+          remaining: Number.isFinite(parseInt(p.remaining, 10)) ? parseInt(p.remaining, 10) : 0
+        })).filter(p => p.name);
+      } catch(e) {
+        console.warn("Lỗi đọc prize config:", e);
+        return null;
+      }
+    }
+
+    function loadCtrlConfig() {
+      const raw = localStorage.getItem(CTRL_KEY);
+      if (!raw) return null;
+      try {
+        return JSON.parse(raw);
+      } catch(e) {
+        console.warn("Lỗi đọc ctrl config:", e);
+        return null;
+      }
+    }
+
+    function setModeUI(mode) {
+      modeRadios.forEach(r => {
+        r.checked = (r.value === mode);
+      });
+
+      forceBox.style.opacity = (mode === "force") ? 1 : 0.4;
+      weightedBox.style.opacity = (mode === "weighted") ? 1 : 0.4;
+      hotkeyBox.style.opacity = (mode === "hotkey") ? 1 : 0.4;
+    }
+
+    function renderPrizeTable() {
+      prizeTableBody.innerHTML = "";
+      prizes.forEach((p, idx) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${idx + 1}</td>
+          <td>${p.name}</td>
+          <td>${p.total}</td>
+          <td>${p.remaining}</td>
+          <td><code>${idx}</code></td>
+        `;
+        prizeTableBody.appendChild(tr);
+      });
+      prizeCountBadge.textContent = `${prizes.length} giải`;
+    }
+
+    function renderForceSelect() {
+      forcePrizeSelect.innerHTML = "";
+      prizes.forEach((p, idx) => {
+        const opt = document.createElement("option");
+        opt.value = idx;
+        opt.textContent = `#${idx + 1} – ${p.name}`;
+        forcePrizeSelect.appendChild(opt);
+      });
+
+      if (ctrlConfig.forceIndex != null && ctrlConfig.forceIndex < prizes.length) {
+        forcePrizeSelect.value = ctrlConfig.forceIndex;
+      }
+    }
+
+    function renderWeightTable() {
+      weightTableBody.innerHTML = "";
+      const weights = ctrlConfig.weights || [];
+      prizes.forEach((p, idx) => {
+        const wVal = Number.isFinite(weights[idx]) ? weights[idx] : 0;
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${idx + 1}</td>
+          <td>${p.name}</td>
+          <td>
+            <input type="number" class="form-control form-control-sm weight-input" 
+                   data-idx="${idx}" min="0" value="${wVal}">
+          </td>
+          <td class="weight-percent" data-idx="${idx}">0%</td>
+        `;
+        weightTableBody.appendChild(tr);
+      });
+      updateWeightPercents();
+    }
+
+    function updateWeightPercents() {
+      const inputs = weightTableBody.querySelectorAll(".weight-input");
+      let total = 0;
+      inputs.forEach(inp => {
+        const v = parseFloat(inp.value) || 0;
+        total += v;
+      });
+      totalWeightSpan.textContent = total;
+
+      inputs.forEach(inp => {
+        const v = parseFloat(inp.value) || 0;
+        const tdPercent = weightTableBody.querySelector(
+          `.weight-percent[data-idx="${inp.dataset.idx}"]`
+        );
+        if (!tdPercent) return;
+        if (total <= 0) {
+          tdPercent.textContent = "0%";
+        } else {
+          const pct = (v / total * 100).toFixed(1);
+          tdPercent.textContent = `${pct}%`;
+        }
+      });
+    }
+
+    function renderHotkeyTable() {
+      hotkeyTableBody.innerHTML = "";
+
+      let hotkeys = ctrlConfig.hotkeys;
+      if (!Array.isArray(hotkeys) || !hotkeys.length) {
+        hotkeys = [
+          { key: "1", index: 0 },
+          { key: "2", index: 1 },
+          { key: "3", index: 2 }
+        ];
+      }
+
+      hotkeys.forEach((h, rowIdx) => {
+        const tr = document.createElement("tr");
+
+        tr.innerHTML = `
+          <td>
+            <input type="text" class="form-control form-control-sm hotkey-key" 
+                   maxlength="1" value="${(h.key || "").toUpperCase()}">
+          </td>
+          <td>
+            <select class="form-select form-select-sm hotkey-index">
+              ${prizes.map((p, i) => `
+                <option value="${i}" ${i === h.index ? "selected" : ""}>
+                  #${i + 1} – ${p.name}
+                </option>`).join("")}
+            </select>
+          </td>
+          <td class="small text-muted">
+            Bấm phím này khi đang quay để ép trúng.
+          </td>
+        `;
+
+        tr.dataset.rowIndex = rowIdx;
+        hotkeyTableBody.appendChild(tr);
+      });
+
+      const trAdd = document.createElement("tr");
+      trAdd.innerHTML = `
+        <td colspan="3">
+          <button type="button" class="btn btn-outline-secondary btn-sm w-100" id="btnAddHotkey">
+            + Thêm phím bí mật
+          </button>
+        </td>
+      `;
+      hotkeyTableBody.appendChild(trAdd);
+
+      const btnAdd = trAdd.querySelector("#btnAddHotkey");
+      btnAdd.addEventListener("click", () => {
+        const newHot = { key: "", index: 0 };
+        ctrlConfig.hotkeys = collectHotkeys().concat([newHot]);
+        renderHotkeyTable();
+      });
+    }
+
+    function collectHotkeys() {
+      const rows = [...hotkeyTableBody.querySelectorAll("tr")];
+      const result = [];
+      rows.forEach(tr => {
+        const keyInp = tr.querySelector(".hotkey-key");
+        const idxSel = tr.querySelector(".hotkey-index");
+        if (!keyInp || !idxSel) return;
+        const keyVal = keyInp.value.trim().toUpperCase();
+        if (!keyVal) return;
+        const idx = parseInt(idxSel.value, 10) || 0;
+        result.push({ key: keyVal, index: idx });
+      });
+      return result;
+    }
+
+    function collectWeights() {
+      const inputs = weightTableBody.querySelectorAll(".weight-input");
+      const arr = [];
+      inputs.forEach(inp => {
+        const idx = parseInt(inp.dataset.idx, 10);
+        const v = parseFloat(inp.value) || 0;
+        arr[idx] = v;
+      });
+      return arr;
+    }
+
+    function getSelectedMode() {
+      let mode = "normal";
+      modeRadios.forEach(r => {
+        if (r.checked) mode = r.value;
+      });
+      return mode;
+    }
+
+    // ----- INIT -----
+    function init() {
+      const p = loadPrizeConfig();
+      if (!p || !p.length) {
+        alert("Không đọc được danh sách giải từ wheel_prize_config_v1.\nHãy cấu hình quà trong gt.html trước.");
+        prizes = [];
+      } else {
+        prizes = p;
+      }
+
+      const c = loadCtrlConfig();
+      ctrlConfig = {
+        mode: "normal",
+        forceIndex: 0,
+        weights: prizes.map(() => 0),
+        hotkeys: [],
+        ...(c || {})
+      };
+
+      renderPrizeTable();
+      renderForceSelect();
+      renderWeightTable();
+      renderHotkeyTable();
+      setModeUI(ctrlConfig.mode || "normal");
+
+      modeRadios.forEach(r => {
+        r.addEventListener("change", () => {
+          setModeUI(getSelectedMode());
+        });
+      });
+
+      weightTableBody.addEventListener("input", e => {
+        if (e.target.classList.contains("weight-input")) {
+          updateWeightPercents();
+        }
+      });
+
+      btnSave.addEventListener("click", () => {
+        const mode = getSelectedMode();
+        const forceIndex = parseInt(forcePrizeSelect.value, 10) || 0;
+        const weights = collectWeights();
+        const hotkeys = collectHotkeys();
+
+        const saveObj = {
+          mode,
+          forceIndex,
+          weights,
+          hotkeys
+        };
+        localStorage.setItem(CTRL_KEY, JSON.stringify(saveObj));
+        alert("Đã lưu cấu hình điều khiển ăn gian vào localStorage (" + CTRL_KEY + ").");
+      });
+
+      btnReload.addEventListener("click", () => {
+        const c2 = loadCtrlConfig();
+        if (!c2) {
+          alert("Chưa có cấu hình điều khiển nào (wheel_ctrl_config_v1 chưa tồn tại).");
+          return;
+        }
+        ctrlConfig = {
+          mode: "normal",
+          forceIndex: 0,
+          weights: prizes.map(() => 0),
+          hotkeys: [],
+          ...c2
+        };
+        renderForceSelect();
+        renderWeightTable();
+        renderHotkeyTable();
+        setModeUI(ctrlConfig.mode || "normal");
+        alert("Đã nạp lại cấu hình điều khiển từ localStorage.");
+      });
+
+      btnResetDefault.addEventListener("click", () => {
+        ctrlConfig = {
+          mode: "normal",
+          forceIndex: 0,
+          weights: prizes.map(() => 0),
+          hotkeys: []
+        };
+        renderForceSelect();
+        renderWeightTable();
+        renderHotkeyTable();
+        setModeUI("normal");
+        alert("Đã đưa về chế độ Bình thường (không ăn gian).");
+      });
+
+      btnClearCtrl.addEventListener("click", () => {
+        if (!confirm("Xóa hẳn cấu hình điều khiển ăn gian?")) return;
+        localStorage.removeItem(CTRL_KEY);
+        ctrlConfig = {
+          mode: "normal",
+          forceIndex: 0,
+          weights: prizes.map(() => 0),
+          hotkeys: []
+        };
+        renderForceSelect();
+        renderWeightTable();
+        renderHotkeyTable();
+        setModeUI("normal");
+        alert("Đã xóa cấu hình điều khiển. Vòng quay = random chuẩn.");
+      });
+    }
+
+    init();
+  </script>
+</body>
+<script src="pass.js"></script>
+
+</html>
