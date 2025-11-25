@@ -1,0 +1,50 @@
+.error-danger {
+    color: red;
+    font-size: 1em;
+    margin-top: 0.25rem;
+    width: 100%;
+}
+
+.btn-danger {
+    color: #ffffff !important;
+}
+
+.dataTables_length label{
+    font-weight: 500;
+}
+
+
+.dataTables_info {
+    display: inline-block;
+    /*float: left;*/
+    margin-top: 5px;
+    margin-left: 10px;
+}
+
+.dataTables_filter {
+    float: right;
+    font-weight: 500;
+}
+
+.dataTables_filter label{
+    font-weight: 500;
+}
+
+.dataTables_wrapper .dataTables_paginate {
+    float: right;
+}
+
+.switchery > small {
+    width: 25px !important;
+    height: 25px !important;
+}
+
+.switchery {
+    width: 50px !important;
+    height: 25px !important;
+}
+
+.swal-footer {
+    text-align: center;
+}
+

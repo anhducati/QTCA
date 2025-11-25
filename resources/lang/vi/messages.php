@@ -1,0 +1,37 @@
+<?php
+return [
+    'header_narbar1' => 'Thông tin xét tuyển',
+    'header_train'=>'Thông tin nghành đào tạo',
+    'header_tuition'=>'Thông tin nghành đào tạo',
+    'header_utilities'=>'Thông tin nghành đào tạo',
+    'lienhe'=>'Liên hệ',
+    'tienich'=>'Tiện ích',
+    'welcome' => 'Chào mừng',
+    'hello' => 'Xin chào',
+    'dangnhap' => 'Đăng nhập',
+    'dangxuat'=> 'Đăng xuất',
+    'timkiem' => 'Tìm kiếm',
+    'timkiem_input' => 'Nhập từ khóa ...',
+    'location'=>'Vị trí của chúng tôi ',
+    'information' =>'Bạn đang tìm thông tin gì ?',
+     'majors'=>'Thông tin các ngành đào tạo',
+     'footer_info'=>'© 2024 TRƯỜNG ĐẠI HỌC THỦY LỢI',
+    'nganhdaotao' => 'Ngành đào tạo > ',
+    'nganhdaotao_' => 'Ngành đào tạo  ',
+    'ngaydang' => 'Ngày đăng: ',
+    'manganh' => 'Mã ngành: ',
+    'tennganh' => 'Tên ngành: ',
+    'tohopXT' => 'Tổ hợp môn xét tuyển: ',
+    "home"=>' Trang chủ ',
+    'baiviet' => ' Bài viết ',
+    'danhmucbaiviet'=> 'Thể loại bài viết ',
+    'baivietmoi'=> 'Bài viết mới nhất',
+    'hottag'=>'Hot Tags Hôm nay ',
+    'map'=>'Tìm chúng tôi trên Google Map',
+    'xemthem'=>'Xem thêm',
+    'tinmoinhat'=>'TIN MỚI NHẤT ',
+    'nhieuluotxem'=>'nhiều lượt xem ',
+    
+    
+     
+];
