@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class InventoryAdjustment extends Model
 {
+    protected $table = 'inventory_adjustments';
+
     protected $fillable = [
         'code',
         'adjustment_date',
@@ -17,30 +19,33 @@ class InventoryAdjustment extends Model
         'approved_by',
     ];
 
-    protected $dates = ['adjustment_date'];
-
+    // Kho
     public function warehouse()
     {
         return $this->belongsTo(Warehouse::class);
     }
 
+    // Phiếu kiểm kê liên quan (nếu có)
     public function stockTake()
     {
         return $this->belongsTo(StockTake::class);
     }
 
+    // Các dòng điều chỉnh
     public function items()
     {
-        return $this->hasMany(InventoryAdjustmentItem::class);
+        return $this->hasMany(InventoryAdjustmentItem::class, 'inventory_adjustment_id');
     }
 
-    public function creator()
+    // Người tạo phiếu
+    public function createdBy()
     {
-        return $this->belongsTo(\App\Models\User::class, 'created_by');
+        return $this->belongsTo(User::class, 'created_by');
     }
 
-    public function approver()
+    // Người duyệt phiếu (nếu anh có dùng sau này)
+    public function approvedBy()
     {
-        return $this->belongsTo(\App\Models\User::class, 'approved_by');
+        return $this->belongsTo(User::class, 'approved_by');
     }
 }

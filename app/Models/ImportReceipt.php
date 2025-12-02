@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use App\Models\User;
 
 class ImportReceipt extends Model
 {
@@ -36,13 +37,26 @@ class ImportReceipt extends Model
         return $this->hasMany(ImportReceiptItem::class);
     }
 
+    // ⚠ Quan hệ cũ anh đang có
     public function creator()
     {
-        return $this->belongsTo(\App\Models\User::class, 'created_by');
+        return $this->belongsTo(User::class, 'created_by');
+    }
+
+    // ✅ Thêm alias createdBy để phù hợp với controller + view
+    public function createdBy()
+    {
+        return $this->belongsTo(User::class, 'created_by');
+        // hoặc return $this->creator();
     }
 
     public function approver()
     {
-        return $this->belongsTo(\App\Models\User::class, 'approved_by');
+        return $this->belongsTo(User::class, 'approved_by');
+    }
+
+    public function vehicles()
+    {
+        return $this->hasMany(Vehicle::class, 'import_receipt_id');
     }
 }

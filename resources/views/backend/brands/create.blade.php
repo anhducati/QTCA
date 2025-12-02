@@ -1,53 +1,96 @@
-{{-- resources/views/backend/brands/create.blade.php --}}
-@extends('backend.layouts.master')
+@extends('layouts.panel')
 
-@section('title', 'Thêm hãng xe')
+@section('main')
 
-@section('page-header')
-    <div class="row wrapper border-bottom white-bg page-heading">
-        <div class="col-lg-10">
-            <h2>Thêm hãng xe</h2>
-            <ol class="breadcrumb">
-                <li><a href="{{ route('admin.dashboard') }}">Dashboard</a></li>
-                <li><a href="{{ route('admin.brands.index') }}">Hãng xe</a></li>
-                <li class="active"><strong>Thêm mới</strong></li>
-            </ol>
-        </div>
+<div class="row wrapper border-bottom white-bg page-heading">
+    <div class="col-lg-10">
+        <h2>Hãng xe</h2>
+        <ol class="breadcrumb">
+            <li>
+                <a href="{{ route('admin.dashboard') }}">Dashboard</a>
+            </li>
+            <li>
+                <a href="{{ route('admin.brands.index') }}">Danh sách hãng xe</a>
+            </li>
+            <li class="active">
+                <strong>Thêm hãng xe</strong>
+            </li>
+        </ol>
     </div>
-@endsection
+    <div class="col-lg-2"></div>
+</div>
 
-@section('content')
-<div class="row">
-    <div class="col-lg-12">
+<div class="wrapper wrapper-content animated fadeInRight">
+    <div class="row">
 
-        <div class="ibox">
-            <div class="ibox-title">
-                <h5>Thêm hãng xe</h5>
-            </div>
-            <div class="ibox-content">
-
-                @include('backend.partials.flash')
-
-                <form action="{{ route('admin.brands.store') }}" method="POST">
-                    @csrf
-
-                    @php $brand = null; @endphp
-                    @include('backend.brands._form')
-
-                    <div class="hr-line-dashed"></div>
-                    <div class="form-group">
-                        <button class="btn btn-primary" type="submit">
-                            <i class="fa fa-save"></i> Lưu
-                        </button>
-                        <a href="{{ route('admin.brands.index') }}" class="btn btn-default">
-                            Hủy
+        <div class="col-lg-8">
+            <div class="ibox float-e-margins">
+                <div class="ibox-title">
+                    <h5>Thêm hãng xe mới</h5>
+                    <div class="ibox-tools">
+                        <a class="collapse-link">
+                            <i class="fa fa-chevron-up"></i>
                         </a>
                     </div>
-                </form>
+                </div>
+
+                <div class="ibox-content">
+                    @include('layouts.message')
+
+                    <form action="{{ route('admin.brands.store') }}" method="POST">
+                        @csrf
+
+                        <div class="form-group">
+                            <label>Mã hãng <span class="text-danger">*</span></label>
+                            <input type="text"
+                                   name="code"
+                                   class="form-control"
+                                   placeholder="Ví dụ: YMH, HND..."
+                                   value="{{ old('code') }}">
+                            @error('code')
+                            <div class="error-danger">* {{ $message }}</div>
+                            @enderror
+                        </div>
+
+                        <div class="form-group">
+                            <label>Tên hãng <span class="text-danger">*</span></label>
+                            <input type="text"
+                                   name="name"
+                                   class="form-control"
+                                   placeholder="Tên hãng xe"
+                                   value="{{ old('name') }}">
+                            @error('name')
+                            <div class="error-danger">* {{ $message }}</div>
+                            @enderror
+                        </div>
+
+                        <div class="form-group">
+                            <label>Ghi chú</label>
+                            <textarea name="note"
+                                      class="form-control"
+                                      rows="3"
+                                      placeholder="Ghi chú thêm (nếu có)">{{ old('note') }}</textarea>
+                            @error('note')
+                            <div class="error-danger">* {{ $message }}</div>
+                            @enderror
+                        </div>
+
+                        <div class="m-t-md">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fa fa-save"></i> Lưu hãng xe
+                            </button>
+                            <a href="{{ route('admin.brands.index') }}" class="btn btn-default">
+                                Quay lại danh sách
+                            </a>
+                        </div>
+
+                    </form>
+                </div>
 
             </div>
         </div>
 
     </div>
 </div>
+
 @endsection

@@ -5,299 +5,1007 @@ namespace App\Http\Controllers\Backend;
 use App\Http\Controllers\Controller;
 use App\Models\ExportReceipt;
 use App\Models\ExportReceiptItem;
+use App\Models\Supplier;
 use App\Models\Warehouse;
-use App\Models\Customer;
 use App\Models\Vehicle;
 use App\Models\VehicleModel;
-use App\Models\Payment;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 
+use App\Models\VehicleSalePayment;
+use App\Models\Customer;
+use App\Models\VehicleSale;
+
+use Barryvdh\DomPDF\Facade\Pdf;
+
 class ExportReceiptController extends Controller
 {
+    protected string $moduleKey = 'export_receipts';
+
+    /**
+     * Check quyền module
+     */
+    protected function authorizeModule(string $action)
+    {
+        $user = Auth::user();
+
+        if (!$user || !$user->canModule($this->moduleKey, $action)) {
+            return redirect()->back()
+                ->with('msg-error', 'Tài khoản của bạn không có quyền truy cập chức năng này.');
+        }
+
+        return null;
+    }
+
+    /**
+     * DANH SÁCH PHIẾU XUẤT
+     */
     public function index(Request $request)
     {
-        $query = ExportReceipt::with(['customer', 'warehouse']);
+        if ($resp = $this->authorizeModule('read')) {
+            return $resp;
+        }
+
+        $query = ExportReceipt::with(['supplier', 'warehouse', 'createdBy']);
 
         if ($code = $request->get('code')) {
             $query->where('code', 'like', "%{$code}%");
         }
-        if ($customer = $request->get('customer')) {
-            $query->whereHas('customer', function ($q) use ($customer) {
-                $q->where('name', 'like', "%{$customer}%")
-                  ->orWhere('phone', 'like', "%{$customer}%");
-            });
-        }
-        if ($status = $request->get('payment_status')) {
-            $query->where('payment_status', $status);
+
+        if ($from = $request->get('from')) {
+            $query->whereDate('export_date', '>=', $from);
         }
 
-        $receipts = $query->orderByDesc('export_date')->orderByDesc('id')->paginate(20);
+        if ($to = $request->get('to')) {
+            $query->whereDate('export_date', '<=', $to);
+        }
 
-        return view('backend.export_receipts.index', compact('receipts'));
+        if ($warehouseId = $request->get('warehouse_id')) {
+            $query->where('warehouse_id', $warehouseId);
+        }
+
+        if ($exportType = $request->get('export_type')) {
+            $query->where('export_type', $exportType);
+        }
+
+        // "Khách hàng" = nhà cung cấp (customer_id trỏ sang suppliers)
+        if ($supplierId = $request->get('supplier_id')) {
+            $query->where('customer_id', $supplierId);
+        }
+
+        $receipts = $query->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->paginate(20);
+
+        $warehouses = Warehouse::orderBy('name')->get();
+        $suppliers  = Supplier::orderBy('name')->get();
+
+        return view('backend.export_receipts.index', compact(
+            'receipts',
+            'warehouses',
+            'suppliers'
+        ));
     }
 
+    /**
+     * FORM TẠO PHIẾU XUẤT BÁN BUÔN / CHUYỂN KHO
+     */
     public function create()
     {
-        $warehouses = Warehouse::orderBy('name')->get();
-        $customers  = Customer::orderBy('name')->get();
-        $models     = VehicleModel::with('brand')->orderBy('name')->get();
-        $vehicles   = Vehicle::where('status', 'in_stock')->orderBy('frame_no')->get();
+        if ($resp = $this->authorizeModule('create')) {
+            return $resp;
+        }
 
-        return view('backend.export_receipts.create', compact('warehouses', 'customers', 'models', 'vehicles'));
+        $warehouses = Warehouse::orderBy('name')->get();
+        $suppliers  = Supplier::orderBy('name')->get();
+        $models     = VehicleModel::with('brand')->orderBy('name')->get();
+
+        // Xe đang trong kho (status = 0)
+        $vehiclesInStock = Vehicle::with(['model.brand', 'color', 'warehouse'])
+            ->where('status', 0)
+            ->orderBy('warehouse_id')
+            ->orderBy('id', 'desc')
+            ->limit(200)
+            ->get();
+
+        return view('backend.export_receipts.create', compact(
+            'warehouses',
+            'suppliers',
+            'models',
+            'vehiclesInStock'
+        ));
     }
 
+    /**
+     * LƯU PHIẾU XUẤT KHO
+     * - export_type = sell: bắt buộc chọn nhà cung cấp (đối tác lấy hàng)
+     * - export_type = transfer/demo: không cần khách hàng
+     */
     public function store(Request $request)
     {
+        if ($resp = $this->authorizeModule('create')) {
+            return $resp;
+        }
+
         $data = $request->validate([
-            'code'          => 'required|string|max:50|unique:export_receipts,code',
-            'export_date'   => 'required|date',
-            'warehouse_id'  => 'required|exists:warehouses,id',
-            'customer_id'   => 'required|exists:customers,id',
-            'export_type'   => 'nullable|string|max:50',
-            'note'          => 'nullable|string',
+            'export_date'  => 'required|date',
+            'warehouse_id' => 'required|exists:warehouses,id',
+            'export_type'  => 'required|in:sell,transfer,demo',
 
-            'paid_amount'   => 'nullable|numeric',
-            'due_date'      => 'nullable|date',
+            // "Khách hàng" = Nhà cung cấp, chỉ bắt buộc khi bán buôn
+            'supplier_id'  => 'nullable|exists:suppliers,id',
 
-            'items'                         => 'required|array|min:1',
-            'items.*.vehicle_id'            => 'required|exists:vehicles,id',
-            'items.*.model_id'              => 'required|exists:vehicle_models,id',
-            'items.*.quantity'              => 'nullable|integer|min:1',
-            'items.*.unit_price'            => 'required|numeric',
-            'items.*.discount_amount'       => 'nullable|numeric',
-            'items.*.amount'                => 'nullable|numeric',
-            'items.*.license_plate'         => 'nullable|string|max:20',
-            'items.*.note'                  => 'nullable|string',
+            'due_date'     => 'nullable|date',
+            'note'         => 'nullable|string',
+
+            'items'                    => 'required|array|min:1',
+            'items.*.vehicle_id'       => 'required|exists:vehicles,id',
+            'items.*.unit_price'       => 'nullable',
+            'items.*.discount_amount'  => 'nullable',
+            'items.*.license_plate'    => 'nullable|string|max:20',
+            'items.*.note'             => 'nullable|string',
+        ], [
+            'export_date.required'     => 'Vui lòng chọn ngày xuất.',
+            'warehouse_id.required'    => 'Vui lòng chọn kho xuất.',
+            'export_type.required'     => 'Vui lòng chọn loại xuất kho.',
+            'items.required'           => 'Vui lòng chọn ít nhất 1 xe để xuất kho.',
+            'items.*.vehicle_id.required' => 'Thiếu thông tin xe xuất kho.',
         ]);
 
-        DB::transaction(function () use ($data) {
-            $userId   = Auth::id();
-            $paid     = $data['paid_amount'] ?? 0;
-            $type     = $data['export_type'] ?? 'sell';
+        // Nếu là bán buôn thì phải chọn nhà cung cấp (đối tác)
+        if ($data['export_type'] === 'sell' && empty($data['supplier_id'])) {
+            return redirect()->back()
+                ->withInput()
+                ->with('msg-error', 'Vui lòng chọn nhà cung cấp (đối tác nhận xe) cho phiếu xuất bán buôn.');
+        }
+
+        DB::transaction(function () use ($data, &$receipt) {
+
+            // Sinh mã PXK auto nếu không nhập tay
+            if (empty($data['code'] ?? null)) {
+                $last = ExportReceipt::where('code', 'like', 'PXK_%')
+                    ->orderByRaw("CAST(SUBSTRING(code, 5) AS UNSIGNED) DESC")
+                    ->first();
+
+                if ($last) {
+                    $lastNumber = (int) str_replace('PXK_', '', $last->code);
+                    $nextNumber = $lastNumber + 1;
+                } else {
+                    $nextNumber = 1;
+                }
+                $code = 'PXK_' . $nextNumber;
+            } else {
+                $code = $data['code'];
+            }
 
             $receipt = ExportReceipt::create([
-                'code'          => $data['code'],
-                'export_date'   => $data['export_date'],
-                'warehouse_id'  => $data['warehouse_id'],
-                'customer_id'   => $data['customer_id'],
-                'export_type'   => $type,
-                'total_amount'  => 0,
-                'paid_amount'   => $paid,
-                'debt_amount'   => 0,
-                'payment_status'=> 'unpaid',
-                'due_date'      => $data['due_date'] ?? null,
-                'note'          => $data['note'] ?? null,
-                'created_by'    => $userId,
-                'approved_by'   => null,
+                'code'         => $code,
+                'export_date'  => $data['export_date'],
+                'warehouse_id' => $data['warehouse_id'],
+                'customer_id'  => $data['export_type'] === 'sell'
+                    ? ($data['supplier_id'] ?? null)
+                    : null, // chuyển kho / demo thì không cần khách hàng
+                'export_type'    => $data['export_type'],
+                'total_amount'   => 0,
+                'paid_amount'    => 0,
+                'debt_amount'    => 0,
+                'payment_status' => 'unpaid', // chưa thu tiền
+                'due_date'       => $data['due_date'] ?? null,
+                'note'           => $data['note'] ?? null,
+                'created_by'     => auth()->id(),
+                'approved_by'    => null,
             ]);
 
             $total = 0;
 
             foreach ($data['items'] as $item) {
-                $qty     = $item['quantity']        ?? 1;
-                $price   = $item['unit_price'];
-                $disc    = $item['discount_amount'] ?? 0;
-                $amount  = $item['amount'] ?? ($qty * $price - $disc);
+                $vehicleId    = $item['vehicle_id'];
+                $unitPriceRaw = $item['unit_price'] ?? null;
+                $discountRaw  = $item['discount_amount'] ?? null;
 
+                // Bóc số tiền "28.000.000" -> 28000000
+                $unitPrice = $unitPriceRaw !== null && $unitPriceRaw !== ''
+                    ? (int) preg_replace('/\D/', '', $unitPriceRaw)
+                    : 0;
+
+                $discount  = $discountRaw !== null && $discountRaw !== ''
+                    ? (int) preg_replace('/\D/', '', $discountRaw)
+                    : 0;
+
+                $amount = max($unitPrice - $discount, 0);
+                $total += $amount;
+
+                // Lấy thông tin xe
+                $vehicle = Vehicle::findOrFail($vehicleId);
+
+                // Tạo dòng chi tiết phiếu xuất
                 ExportReceiptItem::create([
                     'export_receipt_id' => $receipt->id,
-                    'vehicle_id'        => $item['vehicle_id'],
-                    'model_id'          => $item['model_id'],
-                    'quantity'          => $qty,
-                    'unit_price'        => $price,
-                    'discount_amount'   => $disc,
+                    'vehicle_id'        => $vehicleId,
+                    'model_id'          => $vehicle->model_id,
+                    'quantity'          => 1,
+                    'unit_price'        => $unitPrice,
+                    'discount_amount'   => $discount,
                     'amount'            => $amount,
-                    'license_plate'     => $item['license_plate'] ?? null,
+                    'license_plate'     => $item['license_plate'] ?? $vehicle->license_plate,
                     'note'              => $item['note'] ?? null,
                 ]);
 
-                $total += $amount;
+                // ======================
+                // CẬP NHẬT XE THEO LOẠI PHIẾU XUẤT
+                // ======================
+                if ($data['export_type'] === 'sell') {
+                    // BÁN BUÔN (xuất khỏi kho, coi như đã bán cho NCC)
+                    $vehicle->status     = 'sold_wholesale';
+                    $vehicle->sale_price = $unitPrice;
+                    $vehicle->sale_date  = $data['export_date'];
 
-                // Cập nhật xe thành đã bán
-                $vehicle = Vehicle::find($item['vehicle_id']);
-                if ($vehicle) {
-                    $vehicle->update([
-                        'status'        => 'sold',
-                        'sale_price'    => $price,
-                        'sale_date'     => $data['export_date'],
-                        'customer_id'   => $data['customer_id'],
-                        'license_plate' => $item['license_plate'] ?? $vehicle->license_plate,
-                    ]);
+                    // Ghi chú thêm cho dễ tra sau này
+                    $vehicle->note = trim(
+                        ($vehicle->note ? $vehicle->note . ' | ' : '') .
+                        'Xuất bán buôn PXK ' . $receipt->code
+                    );
+
+                } elseif ($data['export_type'] === 'transfer') {
+                    // CHUYỂN KHO
+                    // - tùy mô hình, anh có thể:
+                    //   + Giữ status = in_stock, chỉ thay warehouse_id nếu biết kho đích
+                    //   + Hoặc status = 'transfer' nếu muốn phân biệt rõ
+                    $vehicle->status = 'in_stock'; // hoặc 'transfer' nếu anh thích
+                    // nếu sau này có cột kho đích thì update tại đây
+                    $vehicle->note = trim(
+                        ($vehicle->note ? $vehicle->note . ' | ' : '') .
+                        'Chuyển kho PXK ' . $receipt->code
+                    );
+
+                } elseif ($data['export_type'] === 'demo') {
+                    // XE DEMO / SỰ KIỆN
+                    $vehicle->status = 'demo';
+                    $vehicle->note = trim(
+                        ($vehicle->note ? $vehicle->note . ' | ' : '') .
+                        'Xe demo PXK ' . $receipt->code
+                    );
                 }
+
+                // Lưu xe
+                $vehicle->save();
+
             }
 
-            $debt = $total - $paid;
-            $status = 'unpaid';
-            if ($debt <= 0) {
-                $status = 'paid';
-                $debt   = 0;
-            } elseif ($paid > 0 && $debt > 0) {
-                $status = 'partial';
-            }
-
+            // Cập nhật tổng tiền + nợ
             $receipt->update([
                 'total_amount'   => $total,
-                'debt_amount'    => $debt,
-                'payment_status' => $status,
+                'debt_amount'    => $total,  // mặc định chưa thu tiền
+                'paid_amount'    => 0,
+                'payment_status' => $total > 0 ? 'unpaid' : 'paid',
             ]);
-
-            // Nếu có thu ngay 1 khoản, có thể tạo payment luôn
-            if ($paid > 0) {
-                Payment::create([
-                    'export_receipt_id' => $receipt->id,
-                    'payment_date'      => $data['export_date'],
-                    'amount'            => $paid,
-                    'method'            => 'cash',
-                    'note'              => 'Thanh toán khi mua xe',
-                ]);
-            }
         });
 
-        return redirect()->route('admin.export_receipts.index')
-            ->with('success', 'Tạo phiếu xuất / hóa đơn bán thành công');
+        return redirect()
+            ->route('admin.export_receipts.show', $receipt->id)
+            ->with('msg-success', 'Đã tạo phiếu xuất kho: ' . $receipt->code);
     }
 
+    /**
+     * XEM CHI TIẾT PHIẾU XUẤT
+     */
     public function show(ExportReceipt $exportReceipt)
     {
-        $exportReceipt->load(['customer', 'warehouse', 'items.vehicle.model.brand', 'payments']);
-        return view('backend.export_receipts.show', compact('exportReceipt'));
-    }
+        if ($resp = $this->authorizeModule('read')) {
+            return $resp;
+        }
 
-    public function edit(ExportReceipt $exportReceipt)
-    {
-        $exportReceipt->load('items');
-
-        $warehouses = Warehouse::orderBy('name')->get();
-        $customers  = Customer::orderBy('name')->get();
-        $models     = VehicleModel::with('brand')->orderBy('name')->get();
-        $vehicles   = Vehicle::orderBy('frame_no')->get(); // cả đã bán/lưu
-
-        return view('backend.export_receipts.edit', compact('exportReceipt', 'warehouses', 'customers', 'models', 'vehicles'));
-    }
-
-    public function update(Request $request, ExportReceipt $exportReceipt)
-    {
-        $data = $request->validate([
-            'export_date'   => 'required|date',
-            'warehouse_id'  => 'required|exists:warehouses,id',
-            'customer_id'   => 'required|exists:customers,id',
-            'export_type'   => 'nullable|string|max:50',
-            'note'          => 'nullable|string',
-            'paid_amount'   => 'nullable|numeric',
-            'due_date'      => 'nullable|date',
-
-            'items'                         => 'required|array|min:1',
-            'items.*.id'                    => 'nullable|exists:export_receipt_items,id',
-            'items.*.vehicle_id'            => 'required|exists:vehicles,id',
-            'items.*.model_id'              => 'required|exists:vehicle_models,id',
-            'items.*.quantity'              => 'nullable|integer|min:1',
-            'items.*.unit_price'            => 'required|numeric',
-            'items.*.discount_amount'       => 'nullable|numeric',
-            'items.*.amount'                => 'nullable|numeric',
-            'items.*.license_plate'         => 'nullable|string|max:20',
-            'items.*.note'                  => 'nullable|string',
+        $exportReceipt->load([
+            'supplier',
+            'warehouse',
+            'items.vehicle.model.brand',
+            'items.vehicle.color',
+            'createdBy',
+            'approvedBy',
         ]);
 
-        DB::transaction(function () use ($data, $exportReceipt) {
-            $paid = $data['paid_amount'] ?? $exportReceipt->paid_amount;
+        // Tổng số xe + tổng tiền
+        $totalVehicles = $exportReceipt->items->count();
+        $totalAmount   = $exportReceipt->items->sum('amount');
 
+        return view('backend.export_receipts.show', compact(
+            'exportReceipt',
+            'totalVehicles',
+            'totalAmount'
+        ));
+    }
+
+    /**
+     * SỬA PHIẾU XUẤT
+     * - KHÔNG CHO SỬA KHI payment_status = 'paid_docs' (đã giao giấy tờ)
+     */
+    public function edit(ExportReceipt $exportReceipt)
+    {
+        if ($resp = $this->authorizeModule('update')) {
+            return $resp;
+        }
+
+        // KHÔNG CHO SỬA KHI ĐÃ GIAO GIẤY TỜ
+        if ($exportReceipt->payment_status === 'paid_docs') {
+            return redirect()
+                ->route('admin.export_receipts.show', $exportReceipt->id)
+                ->with('msg-error', 'Phiếu xuất này đã được đánh dấu ĐÃ GIAO GIẤY TỜ, không được phép sửa.');
+        }
+
+        $exportReceipt->load([
+            'warehouse',
+            'supplier',
+            'items.vehicle.model.brand',
+            'items.vehicle.color',
+            'createdBy',
+            'approvedBy',
+        ]);
+
+        $warehouses = Warehouse::orderBy('name')->get();
+        $suppliers  = Supplier::orderBy('name')->get();
+
+        // Danh sách xe được dùng trong phiếu + các xe còn trong kho
+        $vehicleIdsInReceipt = $exportReceipt->items->pluck('vehicle_id')->filter()->unique();
+
+        $vehicles = Vehicle::with(['model.brand', 'color', 'warehouse'])
+            ->where(function ($q) use ($vehicleIdsInReceipt) {
+                if ($vehicleIdsInReceipt->isNotEmpty()) {
+                    $q->whereIn('id', $vehicleIdsInReceipt)
+                      ->orWhere('status', 0);          // xe đang trong kho
+                } else {
+                    $q->where('status', 0);
+                }
+            })
+            ->orderBy('frame_no')
+            ->get();
+
+        return view('backend.export_receipts.edit', compact(
+            'exportReceipt',
+            'warehouses',
+            'suppliers',
+            'vehicles'
+        ));
+    }
+
+    /**
+     * CẬP NHẬT PHIẾU XUẤT
+     */
+    public function update(Request $request, ExportReceipt $exportReceipt)
+    {
+        if ($resp = $this->authorizeModule('update')) {
+            return $resp;
+        }
+
+        // Không cho update nếu đã giao giấy tờ
+        if ($exportReceipt->payment_status === 'paid_docs') {
+            return redirect()
+                ->route('admin.export_receipts.show', $exportReceipt->id)
+                ->with('msg-error', 'Phiếu xuất này đã được đánh dấu ĐÃ GIAO GIẤY TỜ, không được phép sửa.');
+        }
+
+        $data = $request->validate([
+            'export_date'  => 'required|date',
+            'warehouse_id' => 'required|exists:warehouses,id',
+            'export_type'  => 'required|in:sell,transfer,demo',
+            'supplier_id'  => 'nullable|exists:suppliers,id',
+            'due_date'     => 'nullable|date',
+            'note'         => 'nullable|string',
+
+            'items'                    => 'required|array|min:1',
+            'items.*.vehicle_id'       => 'required|exists:vehicles,id',
+            'items.*.unit_price'       => 'nullable',
+            'items.*.note'             => 'nullable|string',
+        ], [
+            'export_date.required'     => 'Vui lòng chọn ngày xuất.',
+            'warehouse_id.required'    => 'Vui lòng chọn kho xuất.',
+            'export_type.required'     => 'Vui lòng chọn loại xuất kho.',
+            'items.required'           => 'Vui lòng chọn ít nhất 1 xe để xuất kho.',
+            'items.*.vehicle_id.required' => 'Thiếu thông tin xe xuất kho.',
+        ]);
+
+        if ($data['export_type'] === 'sell' && empty($data['supplier_id'])) {
+            return redirect()->back()
+                ->withInput()
+                ->with('msg-error', 'Vui lòng chọn nhà cung cấp (đối tác nhận xe) cho phiếu xuất bán buôn.');
+        }
+
+        DB::transaction(function () use ($data, $exportReceipt) {
+
+            // Cập nhật thông tin chung
             $exportReceipt->update([
-                'export_date'   => $data['export_date'],
-                'warehouse_id'  => $data['warehouse_id'],
-                'customer_id'   => $data['customer_id'],
-                'export_type'   => $data['export_type'] ?? $exportReceipt->export_type,
-                'note'          => $data['note'] ?? null,
-                'due_date'      => $data['due_date'] ?? null,
+                'export_date'  => $data['export_date'],
+                'warehouse_id' => $data['warehouse_id'],
+                'customer_id'  => $data['export_type'] === 'sell'
+                    ? ($data['supplier_id'] ?? null)
+                    : null,
+                'export_type'  => $data['export_type'],
+                'due_date'     => $data['due_date'] ?? null,
+                'note'         => $data['note'] ?? null,
             ]);
 
-            $keepIds = [];
-            $total   = 0;
+            // Xóa toàn bộ items cũ rồi tạo lại cho đơn giản
+            ExportReceiptItem::where('export_receipt_id', $exportReceipt->id)->delete();
+
+            $total = 0;
 
             foreach ($data['items'] as $item) {
-                $qty     = $item['quantity']        ?? 1;
-                $price   = $item['unit_price'];
-                $disc    = $item['discount_amount'] ?? 0;
-                $amount  = $item['amount']          ?? ($qty * $price - $disc);
+                $vehicleId    = $item['vehicle_id'];
+                $unitPriceRaw = $item['unit_price'] ?? null;
 
-                if (!empty($item['id'])) {
-                    $detail = ExportReceiptItem::where('export_receipt_id', $exportReceipt->id)
-                        ->where('id', $item['id'])
-                        ->first();
+                $unitPrice = $unitPriceRaw !== null && $unitPriceRaw !== ''
+                    ? (int) preg_replace('/\D/', '', $unitPriceRaw)
+                    : 0;
 
-                    if ($detail) {
-                        $detail->update([
-                            'vehicle_id'      => $item['vehicle_id'],
-                            'model_id'        => $item['model_id'],
-                            'quantity'        => $qty,
-                            'unit_price'      => $price,
-                            'discount_amount' => $disc,
-                            'amount'          => $amount,
-                            'license_plate'   => $item['license_plate'] ?? null,
-                            'note'            => $item['note'] ?? null,
-                        ]);
-                        $keepIds[] = $detail->id;
-                    }
-                } else {
-                    $detail = ExportReceiptItem::create([
-                        'export_receipt_id' => $exportReceipt->id,
-                        'vehicle_id'        => $item['vehicle_id'],
-                        'model_id'          => $item['model_id'],
-                        'quantity'          => $qty,
-                        'unit_price'        => $price,
-                        'discount_amount'   => $disc,
-                        'amount'            => $amount,
-                        'license_plate'     => $item['license_plate'] ?? null,
-                        'note'              => $item['note'] ?? null,
-                    ]);
-                    $keepIds[] = $detail->id;
-                }
-
+                $amount = $unitPrice;
                 $total += $amount;
 
-                $vehicle = Vehicle::find($item['vehicle_id']);
-                if ($vehicle) {
-                    $vehicle->update([
-                        'status'        => 'sold',
-                        'sale_price'    => $price,
-                        'sale_date'     => $data['export_date'],
-                        'customer_id'   => $data['customer_id'],
-                        'license_plate' => $item['license_plate'] ?? $vehicle->license_plate,
-                    ]);
-                }
+                $vehicle = Vehicle::findOrFail($vehicleId);
+
+                ExportReceiptItem::create([
+                    'export_receipt_id' => $exportReceipt->id,
+                    'vehicle_id'        => $vehicleId,
+                    'model_id'          => $vehicle->model_id,
+                    'quantity'          => 1,
+                    'unit_price'        => $unitPrice,
+                    'discount_amount'   => 0,
+                    'amount'            => $amount,
+                    'license_plate'     => $vehicle->license_plate,
+                    'note'              => $item['note'] ?? null,
+                ]);
+
+                // Cập nhật lại trạng thái xe (phòng TH chuyển xe khác)
+                $vehicle->status     = 1;
+                $vehicle->sale_price = $unitPrice;
+                $vehicle->sale_date  = $data['export_date'];
+                $vehicle->save();
             }
 
-            ExportReceiptItem::where('export_receipt_id', $exportReceipt->id)
-                ->whereNotIn('id', $keepIds)
-                ->delete();
+            // Giữ nguyên paid_amount, cập nhật total + debt + status
+            $oldPaid = $exportReceipt->paid_amount ?? 0;
+            $debt    = max($total - $oldPaid, 0);
 
-            $debt = $total - $paid;
-            $status = 'unpaid';
-            if ($debt <= 0) {
-                $status = 'paid';
-                $debt   = 0;
-            } elseif ($paid > 0 && $debt > 0) {
+            if ($oldPaid <= 0) {
+                $status = 'unpaid';
+            } elseif ($debt <= 0) {
+                $status = 'paid'; // Không thể là paid_docs vì đã chặn ở trên
+            } else {
                 $status = 'partial';
             }
 
             $exportReceipt->update([
                 'total_amount'   => $total,
-                'paid_amount'    => $paid,
                 'debt_amount'    => $debt,
                 'payment_status' => $status,
             ]);
         });
 
-        return redirect()->route('admin.export_receipts.index')
-            ->with('success', 'Cập nhật phiếu xuất / hóa đơn thành công');
+        return redirect()
+            ->route('admin.export_receipts.show', $exportReceipt->id)
+            ->with('msg-success', 'Cập nhật phiếu xuất kho thành công.');
     }
 
+    /**
+     * XÓA PHIẾU XUẤT
+     */
     public function destroy(ExportReceipt $exportReceipt)
     {
+        if ($resp = $this->authorizeModule('delete')) {
+            return $resp;
+        }
+
+        // Nếu đã giao giấy tờ thì không cho xóa (anh có thể bỏ nếu muốn)
+        if ($exportReceipt->payment_status === 'paid_docs') {
+            return redirect()
+                ->back()
+                ->with('msg-error', 'Phiếu đã giao giấy tờ, không được phép xóa.');
+        }
+
+        $exportReceipt->items()->delete();
         $exportReceipt->delete();
 
-        return redirect()->route('admin.export_receipts.index')
-            ->with('success', 'Xóa phiếu xuất / hóa đơn thành công');
+        return redirect()
+            ->route('admin.export_receipts.index')
+            ->with('msg-success', 'Xóa phiếu xuất kho thành công.');
     }
+
+    /**
+     * ĐÁNH DẤU ĐÃ NHẬN TIỀN
+     */
+    public function markPaid(ExportReceipt $exportReceipt)
+    {
+        if ($resp = $this->authorizeModule('update')) {
+            return $resp;
+        }
+
+        // Nếu đã paid_docs thì thôi, không cho chỉnh nữa
+        if ($exportReceipt->payment_status === 'paid_docs') {
+            return redirect()
+                ->back()
+                ->with('msg-error', 'Phiếu này đã được đánh dấu ĐÃ NHẬN TIỀN & GIAO GIẤY TỜ, không thể sửa trạng thái thanh toán.');
+        }
+
+        // Tính tổng tiền: ưu tiên amount, fallback unit_price
+        $totalFromAmount = $exportReceipt->items()->sum('amount');
+        $totalFromPrice  = $exportReceipt->items()->sum('unit_price');
+        $total           = $totalFromAmount ?: $totalFromPrice ?: 0;
+
+        $exportReceipt->update([
+            'payment_status' => 'paid',   // Đã thu tiền, chưa giao giấy
+            'paid_amount'    => $total,
+            'debt_amount'    => 0,
+        ]);
+
+        return redirect()
+            ->back()
+            ->with('msg-success', 'Đã đánh dấu phiếu xuất ĐÃ NHẬN ĐỦ TIỀN.');
+    }
+
+    /**
+     * ĐÁNH DẤU ĐÃ GIAO GIẤY TỜ
+     * - Không tạo cột mới, chỉ đổi payment_status -> paid_docs
+     */
+    public function markDocsDelivered(ExportReceipt $exportReceipt)
+    {
+        if ($resp = $this->authorizeModule('update')) {
+            return $resp;
+        }
+
+        if ($exportReceipt->payment_status !== 'paid') {
+            return redirect()
+                ->back()
+                ->with('msg-error', 'Chỉ được giao giấy tờ khi phiếu đã được đánh dấu ĐÃ NHẬN ĐỦ TIỀN.');
+        }
+
+        $exportReceipt->update([
+            'payment_status' => 'paid_docs',
+        ]);
+
+        return redirect()
+            ->back()
+            ->with('msg-success', 'Đã đánh dấu ĐÃ GIAO ĐỦ GIẤY TỜ cho phiếu xuất này.');
+    }
+
+
+
+            // =======================================================
+        // =============== BÁN LẺ XE (HÓA ĐƠN BÁN LẺ) ============
+        // =======================================================
+
+
+        /**
+         * DANH SÁCH HÓA ĐƠN BÁN LẺ
+         */
+        public function indexRetail(Request $request)
+        {
+            // Nếu anh muốn dùng quyền riêng module vehicle_sales
+            // có thể làm 1 hàm authorize riêng, tạm thời vẫn dùng authorizeModule('read')
+            if ($resp = $this->authorizeModule('read')) {
+                return $resp;
+            }
+
+            $query = VehicleSale::with([
+                'vehicle.model.brand',
+                'customer',
+            ]);
+
+            if ($code = $request->get('code')) {
+                $query->where('code', 'like', '%' . $code . '%');
+            }
+
+            if ($from = $request->get('from')) {
+                $query->whereDate('sale_date', '>=', $from);
+            }
+
+            if ($to = $request->get('to')) {
+                $query->whereDate('sale_date', '<=', $to);
+            }
+
+            if ($phone = $request->get('phone')) {
+                $query->whereHas('customer', function ($q) use ($phone) {
+                    $q->where('phone', 'like', '%' . $phone . '%');
+                });
+            }
+
+            if ($status = $request->get('payment_status')) {
+                $query->where('payment_status', $status);
+            }
+
+            $sales = $query->orderByDesc('sale_date')
+                ->orderByDesc('id')
+                ->paginate(20);
+
+            return view('backend.vehicle_sales.index', compact('sales'));
+        }
+
+
+
+        /**
+         * FORM BÁN LẺ
+         */
+        public function createRetail()
+        {
+            if ($resp = $this->authorizeModule('create')) {
+                return $resp;
+            }
+
+            $vehicles = Vehicle::with(['model.brand', 'color', 'warehouse'])
+                ->where(function ($q) {
+                    $q->where('status', 0)
+                    ->orWhere('status', 'in_stock');
+                })
+                ->orderBy('warehouse_id')
+                ->orderBy('frame_no')
+                ->get();
+
+            $customers = Customer::orderBy('name')->limit(50)->get();
+
+            return view('backend.vehicle_sales.create', compact('vehicles', 'customers'));
+        }
+
+
+        /**
+    
+     * LƯU BÁN LẺ (ứng với view bán lẻ mới)
+     */
+    public function storeRetail(Request $request)
+    {
+        if ($resp = $this->authorizeModule('create')) {
+            return $resp;
+        }
+
+        // Validate theo form mới
+        $data = $request->validate([
+            'sale_date'       => 'required|date',
+            'vehicle_id'      => 'required|exists:vehicles,id',
+
+            'sale_price'      => 'required|string',   // tiền dạng "30.000.000"
+            'paid_amount'     => 'required|string',   // khách trả
+            'payment_method'  => 'required|string|in:cash,bank,card,installment,other',
+
+            // debt_amount là ô readonly, chỉ hiển thị -> không dùng cho tính toán backend
+            // 'debt_amount'  => 'nullable|string',
+
+            'sale_note'       => 'nullable|string',
+            'vehicle_note'    => 'nullable|string|max:255',
+
+            // Khách hàng
+            'customer_phone'  => 'required|string|max:20',
+            'customer_name'   => 'required|string|max:191',
+            'customer_address'=> 'nullable|string|max:255',
+            'customer_note'   => 'nullable|string',
+        ], [
+            'sale_date.required'      => 'Vui lòng chọn ngày bán.',
+            'vehicle_id.required'     => 'Vui lòng chọn xe cần bán.',
+            'sale_price.required'     => 'Vui lòng nhập giá bán.',
+            'paid_amount.required'    => 'Vui lòng nhập số tiền khách trả.',
+            'payment_method.required' => 'Vui lòng chọn hình thức thanh toán.',
+            'customer_phone.required' => 'Vui lòng nhập số điện thoại khách hàng.',
+            'customer_name.required'  => 'Vui lòng nhập tên khách hàng.',
+        ]);
+
+        // Nếu là trả góp thì bắt buộc phải có ghi chú (phòng trường hợp JS không chạy)
+        if ($data['payment_method'] === 'installment' && empty($data['sale_note'])) {
+            return back()
+                ->withInput()
+                ->withErrors(['sale_note' => 'Vui lòng ghi chú thông tin nợ trả góp.']);
+        }
+
+        DB::transaction(function () use (&$sale, $data) {
+
+            // ====== Tách tiền từ string format VNĐ ======
+            $salePrice = (int) preg_replace('/\D/', '', $data['sale_price'] ?? '0');
+            $paid      = (int) preg_replace('/\D/', '', $data['paid_amount'] ?? '0');
+
+            if ($salePrice < 0) $salePrice = 0;
+            if ($paid < 0)      $paid      = 0;
+
+            // Tổng phải thu = giá bán, nợ = giá bán - đã trả
+            $amount = $salePrice;
+            $debt   = max($salePrice - $paid, 0);
+
+            // ====== Tìm hoặc tạo khách theo SĐT ======
+            $customer = Customer::firstOrCreate(
+                ['phone' => $data['customer_phone']],
+                ['name'  => $data['customer_name']]
+            );
+
+            // Cập nhật thông tin khách (cho phép sửa)
+            $customer->update([
+                'name'    => $data['customer_name'],
+                'address' => $data['customer_address'] ?? $customer->address,
+                'note'    => $data['customer_note'] ?? $customer->note,
+            ]);
+
+            // ====== Lấy xe ======
+            $vehicle = Vehicle::findOrFail($data['vehicle_id']);
+
+            // ====== Sinh mã hóa đơn HDBL_xxx ======
+            $lastSale = VehicleSale::where('code', 'LIKE', 'HDBL_%')
+                ->orderByRaw("CAST(SUBSTRING(code, 6) AS UNSIGNED) DESC")
+                ->first();
+
+            if ($lastSale) {
+                $lastNumber = (int) str_replace('HDBL_', '', $lastSale->code);
+                $nextNumber = $lastNumber + 1;
+            } else {
+                $nextNumber = 1;
+            }
+
+            $code = 'HDBL_' . $nextNumber;
+
+            // ====== Gộp ghi chú xe vào note hóa đơn (nếu có) ======
+            $note = $data['sale_note'] ?? null;
+            if (!empty($data['vehicle_note'])) {
+                $vehicleNoteText = 'Ghi chú xe: ' . $data['vehicle_note'];
+                $note = $note ? ($note . ' | ' . $vehicleNoteText) : $vehicleNoteText;
+            }
+
+            // Trạng thái thanh toán
+            $paymentStatus = $debt > 0 ? 'partial' : 'paid';
+
+            // ====== Tạo bản ghi VehicleSale (KHÔNG còn cột discount) ======
+            $sale = VehicleSale::create([
+                'code'          => $code,
+                'sale_date'     => $data['sale_date'],
+                'vehicle_id'    => $vehicle->id,
+                'customer_id'   => $customer->id,
+
+                'sale_price'    => $salePrice,
+                'amount'        => $amount,
+
+                'paid_amount'   => $paid,
+                'debt_amount'   => $debt,
+                'payment_status'=> $paymentStatus,
+
+                'payment_method'=> $data['payment_method'],
+                'note'          => $note,
+                'vehicle_note'  => $data['vehicle_note'] ?? null,
+                'created_by'    => auth()->id(),
+            ]);
+
+            
+            // ====== Lưu thanh toán (vehicle_sale_payments) nếu khách có trả tiền ======
+            if ($paid > 0) {
+                VehicleSalePayment::create([
+                    'vehicle_sale_id' => $sale->id,
+                    'amount'          => $paid,
+                    'method'          => $data['payment_method'] ?? 'cash',
+                    'payment_date'    => $data['sale_date'], // <<< quan trọng
+                    'note'            => 'Thanh toán lần đầu khi mua xe ' . $sale->code,
+                    'created_by'      => auth()->id(),
+                ]);
+            }
+
+
+            // ====== Cập nhật trạng thái xe ======
+            $vehicle->status     = 1; // hoặc 'sold'
+            $vehicle->sale_price = $salePrice;
+            $vehicle->sale_date  = $data['sale_date'];
+            $vehicle->save();
+        });
+
+        return redirect()
+            ->route('admin.vehicle_sales.show', $sale->id)
+            ->with('msg-success', 'Đã tạo hóa đơn bán lẻ: ' . $sale->code);
+    }
+
+
+        /**
+         * API tìm xe theo số khung
+         */
+        public function findRetailVehicle(Request $request)
+        {
+            if ($resp = $this->authorizeModule('read')) {
+                return $resp;
+            }
+
+            $frameNo = trim($request->frame_no);
+
+            $vehicle = Vehicle::with(['model.brand', 'color', 'warehouse'])
+                ->where('frame_no', 'like', '%' . $frameNo . '%')
+                ->where(function ($q) {
+                    $q->where('status', 0)->orWhere('status', 'in_stock');
+                })
+                ->first();
+
+            if (!$vehicle) {
+                return response()->json(['success' => false], 404);
+            }
+
+            return response()->json(['success' => true, 'vehicle' => $vehicle]);
+        }
+
+
+        /**
+         * API tìm khách theo số điện thoại
+         */
+        public function findRetailCustomer(Request $request)
+        {
+            if ($resp = $this->authorizeModule('read')) {
+                return $resp;
+            }
+
+            $phone = trim($request->phone);
+            $customer = Customer::where('phone', $phone)->first();
+
+            if (!$customer) {
+                return response()->json(['success' => false], 404);
+            }
+
+            return response()->json(['success' => true, 'customer' => $customer]);
+        }
+
+            /**
+     * XEM CHI TIẾT HÓA ĐƠN BÁN LẺ + LỊCH SỬ TRẢ GÓP
+     */
+    public function showRetail(VehicleSale $vehicleSale)
+    {
+        // Tùy anh có muốn check quyền export_receipts hay không
+        if ($resp = $this->authorizeModule('read')) {
+            return $resp;
+        }
+
+        $vehicleSale->load([
+            'vehicle.model.brand',
+            'vehicle.color',
+            'customer',
+            'payments',   // hasMany VehicleSalePayment
+            'createdBy',
+        ]);
+
+        $totalPaidHistory = $vehicleSale->payments->sum('amount');
+
+        return view('backend.vehicle_sales.show', [
+            'sale'             => $vehicleSale,
+            'totalPaidHistory' => $totalPaidHistory,
+        ]);
+    }
+
+
+
+
+    public function printRetail(VehicleSale $sale)
+    {
+        $sale->load(['vehicle.model.brand', 'vehicle.color', 'customer']);
+
+        return Pdf::loadView('backend.vehicle_sales.print', [
+            'sale' => $sale
+        ])
+        ->setPaper('A5')
+        ->stream("HopDong_{$sale->code}.pdf");
+    }
+
+ // FORM THU NỢ
+    // public function createRetailPayment(VehicleSale $vehicleSale)
+    // {
+    //     if ($resp = $this->authorizeModule('update')) {
+    //         return $resp;
+    //     }
+
+    //     $vehicleSale->load(['customer','vehicle']);
+
+    //     return view('backend.vehicle_sales.payment_form', [
+    //         'sale' => $vehicleSale,
+    //     ]);
+    // }
+
+
+            public function createRetailPayment(VehicleSale $vehicleSale)
+        {
+            if ($resp = $this->authorizeModule('update')) {
+                return $resp;
+            }
+
+            $vehicleSale->load(['customer', 'vehicle.model', 'vehicle.color', 'payments']);
+
+            return view('backend.vehicle_sales.payment_form', [
+                'sale' => $vehicleSale,
+            ]);
+        }
+
+
+    // LƯU THU NỢ
+    public function storeRetailPayment(Request $request, VehicleSale $vehicleSale)
+    {
+        if ($resp = $this->authorizeModule('update')) {
+            return $resp;
+        }
+
+        $data = $request->validate([
+            'payment_date' => 'required|date',
+            'amount'       => 'required|string', // cho phép 1.000.000
+            'method'       => 'required|string|in:cash,bank,card,installment,other',
+            'note'         => 'nullable|string',
+        ]);
+
+        // Parse tiền từ "1.000.000" -> 1000000
+        $amount = (int) preg_replace('/\D/', '', $data['amount'] ?? '');
+
+        if ($amount <= 0) {
+            return back()
+                ->withInput()
+                ->withErrors(['amount' => 'Số tiền thu phải lớn hơn 0.']);
+        }
+
+        // Biến để lấy ra sau transaction
+        $debtAfter   = null;
+        $totalPaid   = null;
+        $statusAfter = null;
+
+        DB::transaction(function () use ($data, $amount, $vehicleSale, &$debtAfter, &$totalPaid, &$statusAfter) {
+
+            // 1. Tạo dòng thu nợ
+            VehicleSalePayment::create([
+                'vehicle_sale_id' => $vehicleSale->id,
+                'payment_date'    => $data['payment_date'],
+                'amount'          => $amount,
+                'method'          => $data['method'],
+                'note'            => $data['note'] ?? ('Thu nợ HĐ ' . $vehicleSale->code),
+                'created_by'      => auth()->id(),
+            ]);
+
+            // 2. Tính lại tổng đã thu (gồm cả lần vừa thêm)
+            $totalPaid = $vehicleSale->payments()->sum('amount');
+
+            // Tổng phải thu là cột amount trên hóa đơn
+            $debtAfter = max($vehicleSale->amount - $totalPaid, 0);
+
+            if ($debtAfter <= 0) {
+                $statusAfter = 'paid';
+            } elseif ($totalPaid > 0) {
+                $statusAfter = 'partial';
+            } else {
+                $statusAfter = 'unpaid';
+            }
+
+            // 3. Cập nhật lại hóa đơn
+            $vehicleSale->update([
+                'paid_amount'    => $totalPaid,
+                'debt_amount'    => $debtAfter,
+                'payment_status' => $statusAfter,
+            ]);
+        });
+
+        // 4. Thông báo đẹp theo trạng thái
+        if ($debtAfter <= 0) {
+            $msg = 'Đã thu đủ tiền, hóa đơn ' . $vehicleSale->code . ' đã TẤT TOÁN.';
+        } else {
+            $msg = 'Đã ghi nhận thu nợ. Khách còn nợ: ' .
+                number_format($debtAfter, 0, ',', '.') . ' VNĐ.';
+        }
+
+        return redirect()
+            ->route('admin.vehicle_sales.show', $vehicleSale->id)
+            ->with('msg-success', $msg);
+    }
+
+    // findRetailVehicle(), findRetailCustomer() anh đã có
+
+        public function updateRetailPlate(Request $request)
+        {
+            if ($resp = $this->authorizeModule('update')) {
+                return $resp;
+            }
+
+            $data = $request->validate([
+                'sale_id'       => 'required|exists:vehicle_sales,id',
+                'license_plate' => 'required|string|max:20',
+            ], [
+                'license_plate.required' => 'Vui lòng nhập biển số.',
+            ]);
+
+            $sale = VehicleSale::with('vehicle')->findOrFail($data['sale_id']);
+
+            if ($sale->vehicle) {
+                $sale->vehicle->license_plate = strtoupper(trim($data['license_plate']));
+                $sale->vehicle->save();
+            }
+
+            return redirect()
+                ->route('admin.vehicle_sales.index')
+                ->with('msg-success', 'Đã cập nhật biển số cho hóa đơn ' . $sale->code);
+        }
+
+
 }

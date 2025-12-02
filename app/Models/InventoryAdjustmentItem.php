@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class InventoryAdjustmentItem extends Model
 {
+    protected $table = 'inventory_adjustment_items';
+
     protected $fillable = [
         'inventory_adjustment_id',
         'vehicle_id',
@@ -23,6 +25,6 @@ class InventoryAdjustmentItem extends Model
 
     public function vehicle()
     {
-        return $this->belongsTo(Vehicle::class);
+        return $this->belongsTo(Vehicle::class, 'vehicle_id');
     }
 }

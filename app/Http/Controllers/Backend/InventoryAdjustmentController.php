@@ -1,5 +1,4 @@
 <?php
-
 namespace App\Http\Controllers\Backend;
 
 use App\Http\Controllers\Controller;
@@ -10,182 +9,125 @@ use App\Models\Warehouse;
 use App\Models\Vehicle;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
 
 class InventoryAdjustmentController extends Controller
 {
-    public function index(Request $request)
-    {
-        $query = InventoryAdjustment::with('warehouse');
+    protected string $moduleKey = 'inventory_adjustments';
 
-        if ($code = $request->get('code')) {
-            $query->where('code', 'like', "%{$code}%");
+    protected function authorizeModule(string $action)
+    {
+        $user = Auth::user();
+        if (!$user || !$user->canModule($this->moduleKey, $action)) {
+            return redirect()->back()
+                ->with('msg-error', 'Bạn không có quyền truy cập chức năng này.');
+        }
+        return null;
+    }
+
+    // ===== INDEX: Danh sách DC =====
+    public function index(Request $req)
+    {
+        if ($resp = $this->authorizeModule('read')) return $resp;
+
+            $query = InventoryAdjustment::with(['warehouse', 'stockTake', 'createdBy'])
+            ->orderBy('created_at', 'desc');
+
+        if ($req->code)
+            $query->where('code', 'like', "%{$req->code}%");
+
+        if ($req->warehouse_id)
+            $query->where('warehouse_id', $req->warehouse_id);
+
+        if ($req->from)
+            $query->where('adjustment_date', '>=', $req->from);
+
+        if ($req->to)
+            $query->where('adjustment_date', '<=', $req->to);
+
+        $adjustments = $query->paginate(20);
+        $warehouses = Warehouse::orderBy('name')->get();
+
+        return view('backend.inventory_adjustments.index', compact(
+            'adjustments',
+            'warehouses'
+        ));
+    }
+
+    // ===== TẠO MỚI (thường được tạo từ phiếu kiểm kê) =====
+    public function create(Request $req, $stockTakeId = null)
+    {
+        if ($resp = $this->authorizeModule('create')) return $resp;
+
+        $stockTake = null;
+        if ($stockTakeId)
+            $stockTake = StockTake::with('items.vehicle')->find($stockTakeId);
+
+        $warehouses = Warehouse::orderBy('name')->get();
+
+        return view('backend.inventory_adjustments.create', compact(
+            'stockTake',
+            'warehouses'
+        ));
+    }
+
+    // ===== STORE =====
+    public function store(Request $req)
+    {
+        if ($resp = $this->authorizeModule('create')) return $resp;
+
+        $req->validate([
+            'warehouse_id' => 'required|exists:warehouses,id',
+            'adjustment_date' => 'required|date',
+            'items' => 'required|array|min:1',
+            'items.*.frame_no' => 'required',
+            'items.*.action' => 'required|in:add,remove'
+        ]);
+
+        // Sinh mã DC_x
+        $last = InventoryAdjustment::orderBy('id', 'desc')->first();
+        $next = $last ? ($last->id + 1) : 1;
+        $code = 'DC_' . $next;
+
+        $adj = InventoryAdjustment::create([
+            'code' => $code,
+            'warehouse_id' => $req->warehouse_id,
+            'adjustment_date' => $req->adjustment_date,
+            'reason' => $req->reason,
+            'stock_take_id' => $req->stock_take_id,
+            'note' => $req->note,
+            'created_by' => auth()->id(),
+        ]);
+
+        foreach ($req->items as $i) {
+            InventoryAdjustmentItem::create([
+                'inventory_adjustment_id' => $adj->id,
+                'frame_no' => $i['frame_no'],
+                'engine_no' => $i['engine_no'] ?? null,
+                'vehicle_id' => $i['vehicle_id'] ?? null,
+                'action' => $i['action'],
+                'note' => $i['note'] ?? null,
+            ]);
         }
 
-        $adjustments = $query->orderByDesc('adjustment_date')->orderByDesc('id')->paginate(20);
-
-        return view('backend.inventory_adjustments.index', compact('adjustments'));
+        return redirect()
+            ->route('admin.inventory_adjustments.show', $adj->id)
+            ->with('msg-success', 'Đã tạo phiếu điều chỉnh thành công.');
     }
 
-    public function create()
+    // ===== SHOW DC_x =====
+    public function show($id)
     {
-        $warehouses = Warehouse::orderBy('name')->get();
-        $stockTakes = StockTake::orderByDesc('stock_take_date')->get();
+        if ($resp = $this->authorizeModule('read')) return $resp;
 
-        return view('backend.inventory_adjustments.create', compact('warehouses', 'stockTakes'));
-    }
+        $adjustment = InventoryAdjustment::with([
+            'warehouse',
+            'stockTake',
+            'items.vehicle',
+        ])->findOrFail($id);
 
-    public function store(Request $request)
-    {
-        $data = $request->validate([
-            'code'            => 'required|string|max:50|unique:inventory_adjustments,code',
-            'adjustment_date' => 'required|date',
-            'warehouse_id'    => 'required|exists:warehouses,id',
-            'reason'          => 'nullable|string|max:255',
-            'stock_take_id'   => 'nullable|exists:stock_takes,id',
-            'note'            => 'nullable|string',
-
-            'items'                   => 'nullable|array',
-            'items.*.vehicle_id'      => 'nullable|exists:vehicles,id',
-            'items.*.frame_no'        => 'nullable|string|max:100',
-            'items.*.engine_no'       => 'nullable|string|max:100',
-            'items.*.action'          => 'required|string|max:20',
-            'items.*.qty'             => 'nullable|integer|min:1',
-            'items.*.note'            => 'nullable|string',
-        ]);
-
-        DB::transaction(function () use ($data) {
-            $userId = Auth::id();
-
-            $adj = InventoryAdjustment::create([
-                'code'            => $data['code'],
-                'adjustment_date' => $data['adjustment_date'],
-                'warehouse_id'    => $data['warehouse_id'],
-                'reason'          => $data['reason'] ?? null,
-                'stock_take_id'   => $data['stock_take_id'] ?? null,
-                'note'            => $data['note'] ?? null,
-                'created_by'      => $userId,
-                'approved_by'     => null,
-            ]);
-
-            if (!empty($data['items'])) {
-                foreach ($data['items'] as $item) {
-                    $qty = $item['qty'] ?? 1;
-
-                    InventoryAdjustmentItem::create([
-                        'inventory_adjustment_id' => $adj->id,
-                        'vehicle_id'              => $item['vehicle_id'] ?? null,
-                        'frame_no'                => $item['frame_no'] ?? null,
-                        'engine_no'               => $item['engine_no'] ?? null,
-                        'action'                  => $item['action'],
-                        'qty'                     => $qty,
-                        'note'                    => $item['note'] ?? null,
-                    ]);
-
-                    // Nếu cần xử lý thay đổi Vehicle/status thì viết thêm logic ở đây
-                }
-            }
-        });
-
-        return redirect()->route('admin.inventory_adjustments.index')
-            ->with('success', 'Tạo phiếu điều chỉnh tồn kho thành công');
-    }
-
-    public function show(InventoryAdjustment $inventoryAdjustment)
-    {
-        $inventoryAdjustment->load(['warehouse', 'stockTake', 'items.vehicle']);
-        return view('backend.inventory_adjustments.show', compact('inventoryAdjustment'));
-    }
-
-    public function edit(InventoryAdjustment $inventoryAdjustment)
-    {
-        $inventoryAdjustment->load('items');
-        $warehouses = Warehouse::orderBy('name')->get();
-        $stockTakes = StockTake::orderByDesc('stock_take_date')->get();
-
-        return view('backend.inventory_adjustments.edit', compact('inventoryAdjustment', 'warehouses', 'stockTakes'));
-    }
-
-    public function update(Request $request, InventoryAdjustment $inventoryAdjustment)
-    {
-        $data = $request->validate([
-            'adjustment_date' => 'required|date',
-            'warehouse_id'    => 'required|exists:warehouses,id',
-            'reason'          => 'nullable|string|max:255',
-            'stock_take_id'   => 'nullable|exists:stock_takes,id',
-            'note'            => 'nullable|string',
-
-            'items'                   => 'nullable|array',
-            'items.*.id'              => 'nullable|exists:inventory_adjustment_items,id',
-            'items.*.vehicle_id'      => 'nullable|exists:vehicles,id',
-            'items.*.frame_no'        => 'nullable|string|max:100',
-            'items.*.engine_no'       => 'nullable|string|max:100',
-            'items.*.action'          => 'required|string|max:20',
-            'items.*.qty'             => 'nullable|integer|min:1',
-            'items.*.note'            => 'nullable|string',
-        ]);
-
-        DB::transaction(function () use ($data, $inventoryAdjustment) {
-            $inventoryAdjustment->update([
-                'adjustment_date' => $data['adjustment_date'],
-                'warehouse_id'    => $data['warehouse_id'],
-                'reason'          => $data['reason'] ?? null,
-                'stock_take_id'   => $data['stock_take_id'] ?? null,
-                'note'            => $data['note'] ?? null,
-            ]);
-
-            if (!empty($data['items'])) {
-                $keepIds = [];
-
-                foreach ($data['items'] as $item) {
-                    $qty = $item['qty'] ?? 1;
-
-                    if (!empty($item['id'])) {
-                        $detail = InventoryAdjustmentItem::where('inventory_adjustment_id', $inventoryAdjustment->id)
-                            ->where('id', $item['id'])
-                            ->first();
-                        if ($detail) {
-                            $detail->update([
-                                'vehicle_id' => $item['vehicle_id'] ?? null,
-                                'frame_no'   => $item['frame_no'] ?? null,
-                                'engine_no'  => $item['engine_no'] ?? null,
-                                'action'     => $item['action'],
-                                'qty'        => $qty,
-                                'note'       => $item['note'] ?? null,
-                            ]);
-                            $keepIds[] = $detail->id;
-                        }
-                    } else {
-                        $detail = InventoryAdjustmentItem::create([
-                            'inventory_adjustment_id' => $inventoryAdjustment->id,
-                            'vehicle_id'              => $item['vehicle_id'] ?? null,
-                            'frame_no'                => $item['frame_no'] ?? null,
-                            'engine_no'               => $item['engine_no'] ?? null,
-                            'action'                  => $item['action'],
-                            'qty'                     => $qty,
-                            'note'                    => $item['note'] ?? null,
-                        ]);
-                        $keepIds[] = $detail->id;
-                    }
-
-                    // Xử lý thực tế (tăng/giảm tồn) có thể viết thêm ở đây
-                }
-
-                InventoryAdjustmentItem::where('inventory_adjustment_id', $inventoryAdjustment->id)
-                    ->whereNotIn('id', $keepIds)
-                    ->delete();
-            }
-        });
-
-        return redirect()->route('admin.inventory_adjustments.index')
-            ->with('success', 'Cập nhật phiếu điều chỉnh tồn kho thành công');
-    }
-
-    public function destroy(InventoryAdjustment $inventoryAdjustment)
-    {
-        $inventoryAdjustment->delete();
-
-        return redirect()->route('admin.inventory_adjustments.index')
-            ->with('success', 'Xóa phiếu điều chỉnh tồn kho thành công');
+        return view(
+            'backend.inventory_adjustments.show',
+            compact('adjustment')
+        );
     }
 }

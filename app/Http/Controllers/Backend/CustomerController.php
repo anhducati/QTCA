@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Backend;
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class CustomerController extends Controller
 {
@@ -81,5 +82,27 @@ class CustomerController extends Controller
 
         return redirect()->route('admin.customers.index')
             ->with('success', 'Xóa khách hàng thành công');
+    }
+
+    public function show(Customer $customer)
+    {
+        $user = Auth::user();
+        if (!$user || !$user->canModule('customers', 'read')) {
+            return redirect()->back()
+                ->with('msg-error', 'Bạn không có quyền xem khách hàng.');
+        }
+
+        // Load các hóa đơn bán lẻ + thông tin xe
+        $customer->load([
+            'vehicleSales.vehicle.model.brand',
+            'vehicleSales.vehicle.color',
+        ]);
+
+        // Lấy list hóa đơn, sort mới nhất trước
+        $sales = $customer->vehicleSales()
+            ->orderByDesc('sale_date')
+            ->get();
+
+        return view('backend.customers.show', compact('customer', 'sales'));
     }
 }

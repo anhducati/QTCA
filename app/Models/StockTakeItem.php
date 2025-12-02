@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class StockTakeItem extends Model
 {
+    protected $table = 'stock_take_items';
+
     protected $fillable = [
         'stock_take_id',
         'vehicle_id',
@@ -16,9 +18,14 @@ class StockTakeItem extends Model
         'note',
     ];
 
+    protected $casts = [
+        'system_exists' => 'boolean',
+        'is_present'    => 'boolean',
+    ];
+
     public function stockTake()
     {
-        return $this->belongsTo(StockTake::class, 'stock_take_id');
+        return $this->belongsTo(StockTake::class);
     }
 
     public function vehicle()

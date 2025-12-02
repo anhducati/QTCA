@@ -31,4 +31,6 @@ class ImportReceiptItem extends Model
     {
         return $this->belongsTo(VehicleModel::class, 'model_id');
     }
+
+    
 }

@@ -1,80 +1,105 @@
 @extends('layouts.panel')
 
 @section('main')
+
 <div class="row wrapper border-bottom white-bg page-heading">
     <div class="col-lg-10">
-        <h2>Quản lý dòng xe</h2>
+        <h2>Dòng xe</h2>
         <ol class="breadcrumb">
             <li><a href="{{ route('admin.dashboard') }}">Dashboard</a></li>
-            <li class="active"><strong>Quản lý dòng xe</strong></li>
+            <li class="active"><strong>Danh sách dòng xe</strong></li>
         </ol>
     </div>
+    <div class="col-lg-2"></div>
 </div>
 
 <div class="wrapper wrapper-content animated fadeInRight">
     <div class="row">
         <div class="col-lg-12">
+
             <div class="ibox float-e-margins">
                 <div class="ibox-title">
                     <h5>Danh sách dòng xe</h5>
                     <div class="ibox-tools">
-                        <a href="{{ route('admin.models.create') }}" class="btn btn-danger">
-                            <i class="fa fa-plus"></i> Thêm dòng xe
-                        </a>
-                        <a class="collapse-link">
-                            <i class="fa fa-chevron-up"></i>
-                        </a>
+                        @canModule('models','create')
+                            <a href="{{ route('admin.models.create') }}" class="btn btn-danger btn-xs">
+                                <i class="fa fa-plus"></i> Thêm dòng xe
+                            </a>
+                        @endcanModule
+                        <a class="collapse-link"><i class="fa fa-chevron-up"></i></a>
                     </div>
                 </div>
+
                 <div class="ibox-content">
                     @include('layouts.message')
 
                     <div class="table-responsive">
                         <table class="table table-striped table-bordered table-hover dataTables">
                             <thead>
-                                <tr>
-                                    <th><input type="checkbox" id="checkAll" class="input-checkbox"></th>
-                                    <th>Tên dòng xe</th>
-                                    <th>Hãng xe</th>
-                                    <th class="text-center">Ngày tạo</th>
-                                    <th class="text-center">Thao tác</th>
-                                </tr>
+                            <tr>
+                                <th>#</th>
+                                <th>Mã dòng</th>
+                                <th>Tên dòng</th>
+                                <th>Hãng xe</th>
+                                <th>Năm</th>
+                                <th>Ghi chú</th>
+                                <th class="text-center">Ngày tạo</th>
+                                <th class="text-center">Thao tác</th>
+                            </tr>
                             </thead>
                             <tbody>
-                            @foreach($models as $model)
-                                <tr class="gradeA">
-                                    <td><input type="checkbox" class="input-checkbox"></td>
+                            {{-- $models được truyền từ VehicleModelController@index --}}
+                            @forelse($models as $index => $model)
+                                <tr>
+                                    <td>{{ $index + 1 }}</td>
+                                    <td>{{ $model->code }}</td>
                                     <td>{{ $model->name }}</td>
-                                    <td>{{ $model->brand->name ?? '' }}</td>
+                                    <td>{{ optional($model->brand)->name }}</td>
+                                    <td>{{ $model->year }}</td>
+                                    <td>{{ $model->note }}</td>
                                     <td class="text-center">
-                                        @if($model->created_at)
-                                            {{ $model->created_at->format('d-m-Y H:i') }}
-                                        @endif
+                                        {{ optional($model->created_at)->format('d/m/Y H:i') }}
                                     </td>
                                     <td class="text-center">
-                                        <a href="{{ route('admin.models.edit', $model->id) }}"
-                                           class="btn btn-warning"><i class="fa fa-edit"></i></a>
-                                        <form action="{{ route('admin.models.destroy', $model->id) }}"
-                                              method="POST" style="display:inline-block"
-                                              onsubmit="return confirm('Xóa dòng xe này?')">
-                                            @csrf
-                                            @method('DELETE')
-                                            <button class="btn btn-danger" type="submit">
-                                                <i class="fa fa-trash"></i>
-                                            </button>
-                                        </form>
+                                        @canModule('models','update')
+                                            <a href="{{ route('admin.models.edit', $model->id) }}"
+                                               class="btn btn-warning btn-xs">
+                                                <i class="fa fa-edit"></i>
+                                            </a>
+                                        @endcanModule
+
+                                        @canModule('models','delete')
+                                            <form action="{{ route('admin.models.destroy', $model->id) }}"
+                                                  method="POST"
+                                                  style="display:inline-block;"
+                                                  onsubmit="return confirm('Bạn có chắc muốn xóa dòng xe này?');">
+                                                @csrf
+                                                @method('DELETE')
+                                                <button type="submit" class="btn btn-danger btn-xs">
+                                                    <i class="fa fa-trash"></i>
+                                                </button>
+                                            </form>
+                                        @endcanModule
                                     </td>
                                 </tr>
-                            @endforeach
+                            @empty
+                                <tr>
+                                    <td colspan="8" class="text-center text-muted">
+                                        Chưa có dòng xe nào.
+                                    </td>
+                                </tr>
+                            @endforelse
                             </tbody>
                         </table>
                     </div>
 
                 </div>
             </div>
+
         </div>
     </div>
 </div>
+
 @endsection
 
 @section('page-scripts')

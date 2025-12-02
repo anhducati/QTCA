@@ -1,5 +1,5 @@
 <div class="footer">
     <div>
-        <strong>@ 2024 Đại học Thủy Lợi</strong>
+        <strong>@ 2025 CHUNG ANH</strong>
     </div>
 </div>

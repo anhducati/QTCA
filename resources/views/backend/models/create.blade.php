@@ -1,42 +1,115 @@
 @extends('layouts.panel')
 
 @section('main')
+
 <div class="row wrapper border-bottom white-bg page-heading">
     <div class="col-lg-10">
-        <h2>Thêm dòng xe</h2>
+        <h2>Dòng xe</h2>
         <ol class="breadcrumb">
             <li><a href="{{ route('admin.dashboard') }}">Dashboard</a></li>
-            <li><a href="{{ route('admin.models.index') }}">Quản lý dòng xe</a></li>
-            <li class="active"><strong>Thêm mới</strong></li>
+            <li><a href="{{ route('admin.models.index') }}">Danh sách dòng xe</a></li>
+            <li class="active"><strong>Thêm dòng xe</strong></li>
         </ol>
     </div>
+    <div class="col-lg-2"></div>
 </div>
 
 <div class="wrapper wrapper-content animated fadeInRight">
     <div class="row">
+
         <div class="col-lg-8">
-            <div class="ibox">
+            <div class="ibox float-e-margins">
                 <div class="ibox-title">
-                    <h5>Thông tin dòng xe</h5>
+                    <h5>Thêm dòng xe mới</h5>
+                    <div class="ibox-tools">
+                        <a class="collapse-link"><i class="fa fa-chevron-up"></i></a>
+                    </div>
                 </div>
+
                 <div class="ibox-content">
                     @include('layouts.message')
 
+                    {{-- $brands: danh sách hãng để chọn --}}
                     <form action="{{ route('admin.models.store') }}" method="POST">
                         @csrf
-                        @php $model = null; @endphp
 
-                        @include('backend.models._form')
+                        <div class="form-group">
+                            <label>Hãng xe <span class="text-danger">*</span></label>
+                            <select name="brand_id" class="form-control">
+                                <option value="">-- Chọn hãng xe --</option>
+                                @foreach($brands as $brand)
+                                    <option value="{{ $brand->id }}"
+                                        {{ old('brand_id') == $brand->id ? 'selected' : '' }}>
+                                        {{ $brand->name }}
+                                    </option>
+                                @endforeach
+                            </select>
+                            @error('brand_id')
+                            <div class="error-danger">* {{ $message }}</div>
+                            @enderror
+                        </div>
 
-                        <div class="hr-line-dashed"></div>
-                        <button class="btn btn-primary" type="submit">
-                            <i class="fa fa-save"></i> Lưu
-                        </button>
-                        <a href="{{ route('admin.models.index') }}" class="btn btn-default">Hủy</a>
+                        <div class="form-group">
+                            <label>Mã dòng <span class="text-danger">*</span></label>
+                            <input type="text"
+                                   name="code"
+                                   class="form-control"
+                                   placeholder="VD: JANUS, EX155..."
+                                   value="{{ old('code') }}">
+                            @error('code')
+                            <div class="error-danger">* {{ $message }}</div>
+                            @enderror
+                        </div>
+
+                        <div class="form-group">
+                            <label>Tên dòng <span class="text-danger">*</span></label>
+                            <input type="text"
+                                   name="name"
+                                   class="form-control"
+                                   placeholder="Tên dòng xe"
+                                   value="{{ old('name') }}">
+                            @error('name')
+                            <div class="error-danger">* {{ $message }}</div>
+                            @enderror
+                        </div>
+
+                        <div class="form-group">
+                            <label>Năm</label>
+                            <input type="text"
+                                   name="year"
+                                   class="form-control"
+                                   placeholder="VD: 2024"
+                                   value="{{ old('year') }}">
+                            @error('year')
+                            <div class="error-danger">* {{ $message }}</div>
+                            @enderror
+                        </div>
+
+                        <div class="form-group">
+                            <label>Ghi chú</label>
+                            <textarea name="note" class="form-control" rows="3"
+                                      placeholder="Ghi chú thêm (nếu có)">{{ old('note') }}</textarea>
+                            @error('note')
+                            <div class="error-danger">* {{ $message }}</div>
+                            @enderror
+                        </div>
+
+                        <div class="m-t-md">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fa fa-save"></i> Lưu dòng xe
+                            </button>
+                            <a href="{{ route('admin.models.index') }}" class="btn btn-default">
+                                Quay lại danh sách
+                            </a>
+                        </div>
+
                     </form>
                 </div>
+
             </div>
         </div>
+
     </div>
 </div>
+
 @endsection

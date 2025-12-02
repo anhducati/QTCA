@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use Illuminate\Support\Facades\Blade;
+
 use App\Repositories\BlogRepository;
 use App\Repositories\CategoryRepository;
 use App\Repositories\Interfaces\BlogInterface;
@@ -35,6 +37,15 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+              // Directive: @canModule('brands','create') ... @endcanModule
+        Blade::if('canModule', function (string $module, string $action = 'read') {
+            $user = auth()->user();
+            if (!$user) {
+                return false;
+            }
+
+            // Hàm canModule() đã viết trong User model
+            return $user->canModule($module, $action);
+        });
     }
 }

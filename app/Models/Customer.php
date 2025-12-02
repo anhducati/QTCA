@@ -27,4 +27,9 @@ class Customer extends Model
     {
         return $this->hasMany(ExportReceipt::class);
     }
+    public function vehicleSales()
+    {
+        return $this->hasMany(\App\Models\VehicleSale::class, 'customer_id');
+    }
+
 }

@@ -32,4 +32,16 @@ class ExportReceiptItem extends Model
     {
         return $this->belongsTo(VehicleModel::class, 'model_id');
     }
+
+    public function exportReceipt()
+    {
+        return $this->belongsTo(ExportReceipt::class, 'export_receipt_id');
+    }
+
+    public function exportReceiptItems()
+    {
+        return $this->hasMany(\App\Models\ExportReceiptItem::class, 'vehicle_id');
+    }
+
+
 }

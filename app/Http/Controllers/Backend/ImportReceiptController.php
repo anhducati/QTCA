@@ -12,12 +12,39 @@ use App\Models\VehicleModel;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use App\Services\InventoryLogService;
+
 
 class ImportReceiptController extends Controller
 {
+    protected string $moduleKey = 'import_receipts';
+
+    /**
+     * Kiểm tra quyền của module (tạo / sửa / xóa / xem)
+     */
+    protected function authorizeModule(string $action)
+    {
+        $user = Auth::user();
+
+        if (!$user || !$user->canModule($this->moduleKey, $action)) {
+            return redirect()->back()
+                ->with('msg-error', 'Tài khoản của bạn không có quyền truy cập chức năng này.');
+        }
+
+        return null;
+    }
+
+    /**
+     * DANH SÁCH PHIẾU NHẬP
+     */
     public function index(Request $request)
     {
-        $query = ImportReceipt::with(['supplier', 'warehouse']);
+        // Nếu muốn check quyền đọc:
+        // if ($resp = $this->authorizeModule('read')) {
+        //     return $resp;
+        // }
+
+        $query = ImportReceipt::with(['supplier', 'warehouse', 'createdBy', 'vehicles']);
 
         if ($code = $request->get('code')) {
             $query->where('code', 'like', "%{$code}%");
@@ -31,13 +58,22 @@ class ImportReceiptController extends Controller
             $query->whereDate('import_date', '<=', $to);
         }
 
-        $receipts = $query->orderByDesc('import_date')->orderByDesc('id')->paginate(20);
+        $receipts = $query->orderByDesc('import_date')
+            ->orderByDesc('id')
+            ->paginate(20);
 
         return view('backend.import_receipts.index', compact('receipts'));
     }
 
+    /**
+     * FORM TẠO PHIẾU NHẬP
+     */
     public function create()
     {
+        if ($resp = $this->authorizeModule('create')) {
+            return $resp;
+        }
+
         $suppliers  = Supplier::orderBy('name')->get();
         $warehouses = Warehouse::orderBy('name')->get();
         $models     = VehicleModel::with('brand')->orderBy('name')->get();
@@ -45,75 +81,91 @@ class ImportReceiptController extends Controller
         return view('backend.import_receipts.create', compact('suppliers', 'warehouses', 'models'));
     }
 
+    /**
+     * LƯU PHIẾU NHẬP MỚI
+     */
     public function store(Request $request)
     {
-        $data = $request->validate([
-            'code'         => 'required|string|max:50|unique:import_receipts,code',
-            'import_date'  => 'required|date',
-            'supplier_id'  => 'required|exists:suppliers,id',
-            'warehouse_id' => 'required|exists:warehouses,id',
-            'note'         => 'nullable|string',
+        if ($resp = $this->authorizeModule('create')) {
+            return $resp;
+        }
 
-            'items'                         => 'required|array|min:1',
-            'items.*.vehicle_id'            => 'nullable|exists:vehicles,id',
-            'items.*.model_id'              => 'required|exists:vehicle_models,id',
-            'items.*.quantity'              => 'nullable|integer|min:1',
-            'items.*.unit_price'            => 'nullable|numeric',
-            'items.*.vat_percent'           => 'nullable|numeric',
-            'items.*.amount'                => 'nullable|numeric',
-            'items.*.note'                  => 'nullable|string',
+        // Validate
+        $request->validate([
+            'import_date'  => 'required|date',
+            'warehouse_id' => 'required|exists:warehouses,id',
+            'supplier_id'  => 'required|exists:suppliers,id',
+        ], [
+            'import_date.required'  => 'Ngày nhập không được bỏ trống',
+            'warehouse_id.required' => 'Vui lòng chọn kho nhập',
+            'supplier_id.required'  => 'Vui lòng chọn nhà cung cấp',
         ]);
 
-        DB::transaction(function () use ($data) {
-            $userId = Auth::id();
+        // ========= AUTO GENERATE CODE ==========
+        if (empty($request->code)) {
+            // lấy số lớn nhất của các mã đã sinh
+            $lastReceipt = ImportReceipt::where('code', 'LIKE', 'PNK_%')
+                ->orderByRaw("CAST(SUBSTRING(code, 5) AS UNSIGNED) DESC")
+                ->first();
 
-            $receipt = ImportReceipt::create([
-                'code'         => $data['code'],
-                'import_date'  => $data['import_date'],
-                'supplier_id'  => $data['supplier_id'],
-                'warehouse_id' => $data['warehouse_id'],
-                'total_amount' => 0,
-                'note'         => $data['note'] ?? null,
-                'created_by'   => $userId,
-                'approved_by'  => null,
-            ]);
-
-            $total = 0;
-
-            foreach ($data['items'] as $item) {
-                $qty        = $item['quantity']    ?? 1;
-                $unitPrice  = $item['unit_price']  ?? 0;
-                $amount     = $item['amount']      ?? ($qty * $unitPrice);
-
-                ImportReceiptItem::create([
-                    'import_receipt_id' => $receipt->id,
-                    'vehicle_id'        => $item['vehicle_id'] ?? null,
-                    'model_id'          => $item['model_id'],
-                    'quantity'          => $qty,
-                    'unit_price'        => $unitPrice,
-                    'vat_percent'       => $item['vat_percent'] ?? null,
-                    'amount'            => $amount,
-                    'note'              => $item['note'] ?? null,
-                ]);
-
-                $total += $amount;
+            if ($lastReceipt) {
+                // Tách số N
+                $lastNumber = (int) str_replace('PNK_', '', $lastReceipt->code);
+                $nextNumber = $lastNumber + 1;
+            } else {
+                $nextNumber = 1;
             }
 
-            $receipt->update(['total_amount' => $total]);
-        });
+            $generatedCode = 'PNK_' . $nextNumber;
+        } else {
+            $generatedCode = $request->code;
+        }
 
-        return redirect()->route('admin.import_receipts.index')
-            ->with('success', 'Tạo phiếu nhập thành công');
+        // ====== Tạo phiếu nhập ======
+        $receipt = ImportReceipt::create([
+            'code'        => $generatedCode,
+            'import_date' => $request->import_date,
+            'warehouse_id'=> $request->warehouse_id,
+            'supplier_id' => $request->supplier_id,
+            'note'        => $request->note,
+            'created_by'  => auth()->id(),
+        ]);
+
+        return redirect()
+            ->route('admin.import_receipts.show', $receipt->id)
+            ->with('msg-success', 'Tạo phiếu nhập thành công! Mã phiếu: ' . $generatedCode);
     }
 
+    /**
+     * XEM CHI TIẾT PHIẾU NHẬP
+     */
     public function show(ImportReceipt $importReceipt)
     {
-        $importReceipt->load(['supplier', 'warehouse', 'items.model', 'items.vehicle']);
+        if ($resp = $this->authorizeModule('read')) {
+            return $resp;
+        }
+
+        $importReceipt->load([
+            'supplier',
+            'warehouse',
+            'items.model',
+            'items.vehicle',
+            'vehicles',   // danh sách xe (Vehicle) thuộc phiếu này
+            'createdBy',  // nếu có quan hệ createdBy trong model
+        ]);
+
         return view('backend.import_receipts.show', compact('importReceipt'));
     }
 
+    /**
+     * FORM SỬA PHIẾU NHẬP
+     */
     public function edit(ImportReceipt $importReceipt)
     {
+        if ($resp = $this->authorizeModule('update')) {
+            return $resp;
+        }
+
         $importReceipt->load('items');
 
         $suppliers  = Supplier::orderBy('name')->get();
@@ -123,8 +175,15 @@ class ImportReceiptController extends Controller
         return view('backend.import_receipts.edit', compact('importReceipt', 'suppliers', 'warehouses', 'models'));
     }
 
+    /**
+     * CẬP NHẬT PHIẾU NHẬP
+     */
     public function update(Request $request, ImportReceipt $importReceipt)
     {
+        if ($resp = $this->authorizeModule('update')) {
+            return $resp;
+        }
+
         $data = $request->validate([
             'import_date'  => 'required|date',
             'supplier_id'  => 'required|exists:suppliers,id',
@@ -203,11 +262,88 @@ class ImportReceiptController extends Controller
             ->with('success', 'Cập nhật phiếu nhập thành công');
     }
 
+    /**
+     * XÓA PHIẾU NHẬP
+     */
     public function destroy(ImportReceipt $importReceipt)
     {
+        if ($resp = $this->authorizeModule('delete')) {
+            return $resp;
+        }
+
         $importReceipt->delete();
 
         return redirect()->route('admin.import_receipts.index')
             ->with('success', 'Xóa phiếu nhập thành công');
+    }
+
+    /**
+     * ĐÁNH DẤU ĐÃ THANH TOÁN NCC CHO TOÀN BỘ XE THUỘC PHIẾU
+     */
+    public function markPaid(ImportReceipt $importReceipt)
+    {
+        if ($resp = $this->authorizeModule('update')) {
+            return $resp;
+        }
+
+        $vehiclesQuery = Vehicle::where('import_receipt_id', $importReceipt->id);
+
+        if (!$vehiclesQuery->exists()) {
+            return redirect()
+                ->back()
+                ->with('msg-error', 'Phiếu nhập này chưa có xe nào, không thể đánh dấu đã thanh toán.');
+        }
+
+        $today = now()->toDateString();
+
+        $vehiclesQuery->update([
+            'supplier_paid'    => 1,
+            'supplier_paid_at' => $today,
+        ]);
+
+        return redirect()
+            ->back()
+            ->with('msg-success', 'Đã đánh dấu ĐÃ THANH TOÁN NCC cho toàn bộ xe thuộc phiếu nhập này.');
+    }
+
+    /**
+     * ĐÁNH DẤU ĐÃ NHẬN GIẤY TỜ CHO TOÀN BỘ XE THUỘC PHIẾU
+     */
+    public function markDocsReceived(ImportReceipt $importReceipt)
+    {
+        if ($resp = $this->authorizeModule('update')) {
+            return $resp;
+        }
+
+        $vehicles = Vehicle::where('import_receipt_id', $importReceipt->id)->get();
+
+        if ($vehicles->count() === 0) {
+            return redirect()
+                ->back()
+                ->with('msg-error', 'Phiếu nhập này chưa có xe nào, không thể đánh dấu nhận giấy tờ.');
+        }
+
+        // Chỉ cho nhận giấy tờ khi tất cả xe đã thanh toán NCC
+        $allPaid = $vehicles->every(function ($v) {
+            return (int) $v->supplier_paid === 1;
+        });
+
+        if (!$allPaid) {
+            return redirect()
+                ->back()
+                ->with('msg-error', 'Chỉ được đánh dấu ĐÃ NHẬN GIẤY TỜ khi toàn bộ xe đã được thanh toán NCC.');
+        }
+
+        $today = now()->toDateString();
+
+        Vehicle::where('import_receipt_id', $importReceipt->id)
+            ->update([
+                'registration_received'    => 1,
+                'registration_received_at' => $today,
+            ]);
+
+        return redirect()
+            ->back()
+            ->with('msg-success', 'Đã đánh dấu ĐÃ NHẬN GIẤY TỜ cho toàn bộ xe thuộc phiếu nhập này.');
     }
 }

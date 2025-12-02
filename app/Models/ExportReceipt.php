@@ -10,7 +10,7 @@ class ExportReceipt extends Model
         'code',
         'export_date',
         'warehouse_id',
-        'customer_id',
+        'customer_id',      // thực chất là supplier_id
         'export_type',
         'total_amount',
         'paid_amount',
@@ -32,9 +32,10 @@ class ExportReceipt extends Model
         return $this->belongsTo(Warehouse::class);
     }
 
-    public function customer()
+    // "Khách hàng" = Nhà cung cấp
+    public function supplier()
     {
-        return $this->belongsTo(Customer::class);
+        return $this->belongsTo(Supplier::class, 'customer_id');
     }
 
     public function items()
@@ -42,18 +43,13 @@ class ExportReceipt extends Model
         return $this->hasMany(ExportReceiptItem::class);
     }
 
-    public function payments()
+    public function createdBy()
     {
-        return $this->hasMany(Payment::class);
+        return $this->belongsTo(User::class, 'created_by');
     }
 
-    public function creator()
+    public function approvedBy()
     {
-        return $this->belongsTo(\App\Models\User::class, 'created_by');
-    }
-
-    public function approver()
-    {
-        return $this->belongsTo(\App\Models\User::class, 'approved_by');
+        return $this->belongsTo(User::class, 'approved_by');
     }
 }

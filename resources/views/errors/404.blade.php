@@ -12,7 +12,7 @@
                     <h1> 404 </h1>
                     <h3> Không ổn! Không tìm thấy trang. </h3>
                     <p class="color-777"> Xin lỗi, không thể tìm thấy trang được yêu cầu. <a href="#" class="fw-bold color-000">  Hãy thử tìm kiếm? </a> </p>
-                    <a href="{{ route('client.home') }}" class="butn bg-main text-white hover-shadow mt-50">
+                    <a href="{{ route('client.login') }}" class="butn bg-main text-white hover-shadow mt-50">
                         <span> Trở lại trang chủ </span>
                     </a>
                 </div>
