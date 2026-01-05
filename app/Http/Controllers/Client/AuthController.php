@@ -74,6 +74,52 @@ class AuthController extends Controller
     //         ->with('error', 'Email hoặc mật khẩu không chinh xác')
     //         ->with('msg-error', 'Email hoặc mật khẩu không chinh xác');
     // }
+
+        private function getFirstAllowedRouteForUser($user)
+    {
+        // Admin (T1) -> cho vào Dashboard luôn
+        if ($user->is_admin) {
+            return route('admin.dashboard');
+        }
+
+        // Danh sách ưu tiên, muốn thêm bớt module thì chỉnh ở đây
+        $priority = [
+            ['dashboard',           'read', 'admin.dashboard'],
+
+            ['vehicle_sales',       'read', 'admin.vehicle_sales.index'],
+            ['vehicles',            'read', 'admin.vehicles.index'],
+            ['import_receipts',     'read', 'admin.import_receipts.index'],
+            ['export_receipts',     'read', 'admin.export_receipts.index'],
+
+            ['customers',           'read', 'admin.customers.index'],
+            ['suppliers',           'read', 'admin.suppliers.index'],
+            ['brands',              'read', 'admin.brands.index'],
+            ['models',              'read', 'admin.models.index'],
+            ['colors',              'read', 'admin.colors.index'],
+
+            ['payments',            'read', 'admin.payments.index'],
+            ['stock_takes',         'read', 'admin.stock_takes.index'],
+            ['inventory_logs',      'read', 'admin.inventory_logs.index'],
+            ['inventory_adjustments','read', 'admin.inventory_adjustments.index'],
+        ];
+
+        foreach ($priority as [$module, $action, $routeName]) {
+
+            // Nếu route không tồn tại thì bỏ qua
+            if (!\Illuminate\Support\Facades\Route::has($routeName)) {
+                continue;
+            }
+
+            // Nếu user có quyền module đó
+            if (method_exists($user, 'canModule') && $user->canModule($module, $action)) {
+                return route($routeName);
+            }
+        }
+
+        // Không có quyền vào bất kỳ trang nào
+        return null;
+    }
+
     public function handle_login(LoginRequest $request) {
         $credentials = [
             'email' => $request->input('email'),
@@ -88,7 +134,16 @@ class AuthController extends Controller
     
                 
                 // return redirect()->route($user->is_admin ? 'admin.blog' : 'client.home')->with('success', 'Đăng nhập thành công');
-                return redirect()->route('admin.blog')->with('success', 'Đăng nhập thành công');
+               $target = $this->getFirstAllowedRouteForUser($user);
+
+            if (!$target) {
+                Auth::logout();
+                return redirect()->back()
+                    ->with('msg-error', 'Tài khoản của bạn không có quyền truy cập vào bất kỳ chức năng nào.');
+            }
+
+            return redirect()->intended($target)
+                ->with('success', 'Đăng nhập thành công');
 
             } else {
                 // Nếu status là 0 (không được phép đăng nhập)

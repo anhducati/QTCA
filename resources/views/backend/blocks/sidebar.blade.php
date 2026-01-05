@@ -90,7 +90,7 @@
 
             {{-- DASHBOARD (luôn cho phép vào) --}}
             <li class="{{ request()->routeIs('admin.dashboard') ? 'active' : '' }}">
-                <a href="{{ route('admin.dashboard') }}">
+                <a href="">
                     <i class="fa fa-dashboard"></i>
                     <span class="nav-label">Bảng điều khiển</span>
                 </a>

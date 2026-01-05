@@ -6,293 +6,251 @@ use App\Http\Controllers\Controller;
 use App\Models\Vehicle;
 use App\Models\Customer;
 use App\Models\VehicleSale;
-use App\Models\Payment;
+use App\Models\VehicleSalePayment;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Barryvdh\DomPDF\Facade\Pdf;
+use App\Services\InventoryLogService;
 
 class VehicleSaleController extends Controller
 {
     protected string $moduleKey = 'vehicle_sales';
 
-    /**
-     * Check quyền module (bán lẻ xe)
-     */
+    // ======================= CHECK QUYỀN MODULE ==========================
     protected function authorizeModule(string $action)
     {
         $user = Auth::user();
-
         if (!$user || !$user->canModule($this->moduleKey, $action)) {
-            return redirect()->back()
-                ->with('msg-error', 'Tài khoản của bạn không có quyền truy cập chức năng này.');
+            return redirect()->back()->with('msg-error', 'Bạn không có quyền.');
         }
-
         return null;
     }
 
-    /**
-     * FORM BÁN LẺ
-     */
-    public function create()
+    // ======================= DANH SÁCH ==========================
+    public function index(Request $request)
     {
-        if ($resp = $this->authorizeModule('create')) {
-            return $resp;
+        if ($resp = $this->authorizeModule('read')) return $resp;
+
+        $query = VehicleSale::with(['vehicle.model.brand', 'customer']);
+
+        if ($request->code)
+            $query->where('code', 'like', "%{$request->code}%");
+
+        if ($request->phone) {
+            $query->whereHas('customer', function ($q) use ($request) {
+                $q->where('phone', 'like', "%{$request->phone}%");
+            });
         }
 
-        // Xe còn trong kho (status = 0 hoặc 'in_stock')
-        $vehicles = Vehicle::with(['model.brand', 'color', 'warehouse'])
-            ->where(function ($q) {
-                $q->where('status', 0)
-                  ->orWhere('status', 'in_stock');
-            })
-            ->orderBy('warehouse_id')
+        $sales = $query->orderBy('sale_date', 'desc')->paginate(20);
+
+        return view('backend.vehicle_sales.index', compact('sales'));
+    }
+
+    // ======================= FORM TẠO MỚI ==========================
+    public function create()
+    {
+        if ($resp = $this->authorizeModule('create')) return $resp;
+
+        $vehicles = Vehicle::with(['model.brand','color','warehouse'])
+            ->whereIn('status', [0, 'in_stock'])
             ->orderBy('frame_no')
             ->get();
 
-        // Có thể không cần khách ở form create (vì tìm theo SĐT), nhưng
-        // nếu muốn dropdown khách quen thì load ra:
         $customers = Customer::orderBy('name')->limit(100)->get();
 
-        return view('backend.vehicle_sales.create', compact('vehicles', 'customers'));
+        return view('backend.vehicle_sales.create', compact('vehicles','customers'));
     }
 
-    /**
-     * LƯU BÁN LẺ
-     */
+    // ======================= LƯU HÓA ĐƠN BÁN LẺ ==========================
     public function store(Request $request)
     {
-        if ($resp = $this->authorizeModule('create')) {
-            return $resp;
-        }
+        if ($resp = $this->authorizeModule('create')) return $resp;
 
-        // Validate
         $data = $request->validate([
-            'sale_date'     => 'required|date',
-            'vehicle_id'    => 'required|exists:vehicles,id',
-
-            'sale_price'    => 'required|string',  // tiền dạng "30.000.000"
-            'discount'      => 'nullable|string',  // "0" hoặc "500.000"
-            'paid_amount'   => 'nullable|string',
-            'payment_method'=> 'nullable|string|max:50',
-            'sale_note'     => 'nullable|string',
-
-            'license_plate' => 'nullable|string|max:20',
-
-            // Khách hàng
-            'customer_phone'=> 'required|string|max:20',
-            'customer_name' => 'required|string|max:191',
-            'customer_address' => 'nullable|string|max:255',
-            'customer_note' => 'nullable|string',
-
-        ], [
-            'sale_date.required'      => 'Vui lòng chọn ngày bán.',
-            'vehicle_id.required'     => 'Vui lòng chọn xe cần bán.',
-            'sale_price.required'     => 'Vui lòng nhập giá bán.',
-            'customer_phone.required' => 'Vui lòng nhập số điện thoại khách hàng.',
-            'customer_name.required'  => 'Vui lòng nhập tên khách hàng.',
+            'sale_date'      => 'required|date',
+            'vehicle_id'     => 'required|exists:vehicles,id',
+            'customer_id'    => 'required|exists:customers,id',
+            'sale_price'     => 'required',
+            'paid_amount'    => 'nullable',
+            'payment_method' => 'required|string|max:50',
+            'note'           => 'nullable|string',
+            'vehicle_note'   => 'nullable|string',
         ]);
 
-        DB::transaction(function () use (&$sale, $data) {
+        $sale = null;
+        $vehicle = null;
 
-            // Parse tiền: "30.000.000" -> 30000000
-            $salePrice = (int) preg_replace('/\D/', '', $data['sale_price'] ?? '0');
-            $discount  = (int) preg_replace('/\D/', '', $data['discount'] ?? '0');
-            $paid      = (int) preg_replace('/\D/', '', $data['paid_amount'] ?? '0');
+        DB::transaction(function () use (&$sale, &$vehicle, $data) {
 
-            if ($salePrice < 0) $salePrice = 0;
-            if ($discount < 0)  $discount  = 0;
-            if ($paid < 0)      $paid      = 0;
+            $salePrice = (int) preg_replace('/\D/', '', $data['sale_price']);
+            $paid      = (int) preg_replace('/\D/', '', $data['paid_amount'] ?? 0);
 
-            $amount = max($salePrice - $discount, 0);
+            $amount = $salePrice;
             $debt   = max($amount - $paid, 0);
+            $status = $paid <= 0 ? 'unpaid' : ($debt > 0 ? 'partial' : 'paid');
 
-            // Tìm hoặc tạo mới customer theo SĐT
-            $customer = Customer::where('phone', $data['customer_phone'])->first();
-
-            if (!$customer) {
-                // Khách mới
-                $customer = Customer::create([
-                    'name'    => $data['customer_name'],
-                    'phone'   => $data['customer_phone'],
-                    'address' => $data['customer_address'] ?? null,
-                    'note'    => $data['customer_note'] ?? null,
-                ]);
-            } else {
-                // Khách cũ: nếu đã cho phép sửa thông tin thì cập nhật
-                // Có thể thêm flag "edit_customer = 1" từ form nếu anh muốn kiểm soát
-                $customer->update([
-                    'name'    => $data['customer_name'],
-                    'address' => $data['customer_address'] ?? $customer->address,
-                    'note'    => $data['customer_note'] ?? $customer->note,
-                ]);
-            }
-
-            // Lấy xe
             $vehicle = Vehicle::findOrFail($data['vehicle_id']);
 
-            // Sinh mã HĐ bán lẻ: HDBL_xxx
-            $lastSale = VehicleSale::where('code', 'LIKE', 'HDBL_%')
-                ->orderByRaw("CAST(SUBSTRING(code, 6) AS UNSIGNED) DESC")
-                ->first();
+            // SINH MÃ HDBL_x
+            $last = VehicleSale::orderBy('id', 'desc')->first();
+            $code = 'HDBL_' . (($last ? $last->id : 0) + 1);
 
-            if ($lastSale) {
-                $lastNumber = (int) str_replace('HDBL_', '', $lastSale->code);
-                $nextNumber = $lastNumber + 1;
-            } else {
-                $nextNumber = 1;
-            }
-
-            $code = 'HDBL_' . $nextNumber;
-
-            // Tạo VehicleSale
+            // Tạo hóa đơn
             $sale = VehicleSale::create([
-                'code'          => $code,
-                'sale_date'     => $data['sale_date'],
-                'vehicle_id'    => $vehicle->id,
-                'customer_id'   => $customer->id,
-
-                'sale_price'    => $salePrice,
-                'discount'      => $discount,
-                'amount'        => $amount,
-
-                'paid_amount'   => $paid,
-                'debt_amount'   => $debt,
-                'payment_status'=> $amount == 0 ? 'paid' : ($debt > 0 ? 'partial' : 'paid'),
-
-                'payment_method'=> $data['payment_method'] ?? null,
-                'note'          => $data['sale_note'] ?? null,
-
-                'created_by'    => auth()->id(),
+                'code'           => $code,
+                'sale_date'      => $data['sale_date'],
+                'vehicle_id'     => $vehicle->id,
+                'customer_id'    => $data['customer_id'],
+                'sale_price'     => $salePrice,
+                'amount'         => $amount,
+                'paid_amount'    => $paid,
+                'debt_amount'    => $debt,
+                'payment_status' => $status,
+                'payment_method' => $data['payment_method'],
+                'note'           => $data['note'],
+                'vehicle_note'   => $data['vehicle_note'],
+                'created_by'     => auth()->id(),
             ]);
 
-            // Tạo payment nếu có số tiền thanh toán
+            // Lưu thanh toán đầu tiên
             if ($paid > 0) {
-                Payment::create([
+                VehicleSalePayment::create([
                     'vehicle_sale_id' => $sale->id,
                     'amount'          => $paid,
-                    'method'          => $data['payment_method'] ?? 'cash',
-                    'paid_at'         => $data['sale_date'],
-                    'note'            => 'Thanh toán khi mua xe ' . $sale->code,
+                    'method'          => $data['payment_method'],
+                    'payment_date'    => $data['sale_date'],
+                    'note'            => "Thanh toán lần đầu HĐ {$sale->code}",
                     'created_by'      => auth()->id(),
                 ]);
             }
 
-            // Cập nhật xe: đã bán, giá, ngày bán, biển số (nếu có)
-            $vehicle->status     = 1; // hoặc 'sold'
-            $vehicle->sale_price = $salePrice;
-            $vehicle->sale_date  = $data['sale_date'];
-
-            if (!empty($data['license_plate'])) {
-                $vehicle->license_plate = $data['license_plate'];
-            }
-
+            // Cập nhật xe
+            $vehicle->status      = 'sold';
+            $vehicle->sale_price  = $salePrice;
+            $vehicle->sale_date   = $data['sale_date'];
+            $vehicle->customer_id = $data['customer_id'];
             $vehicle->save();
+        });
+
+        // 🔥 GHI NHẬT KÝ TỒN KHO — 100% chạy được
+        InventoryLogService::logRetailSale($vehicle, $sale);
+
+        return redirect()
+            ->route('admin.vehicle_sales.show', $sale->id)
+            ->with('msg-success', "Đã tạo hóa đơn {$sale->code}");
+    }
+
+    // ======================= XEM CHI TIẾT ==========================
+    public function show(VehicleSale $sale)
+    {
+        if ($resp = $this->authorizeModule('read')) return $resp;
+
+        $sale->load(['vehicle.model.brand','vehicle.color','customer','payments']);
+
+        return view('backend.vehicle_sales.show', compact('sale'));
+    }
+
+    // ======================= FORM THU NỢ ==========================
+    public function createPayment(VehicleSale $sale)
+    {
+        if ($resp = $this->authorizeModule('update')) return $resp;
+
+        $sale->load(['payments','vehicle','customer']);
+
+        return view('backend.vehicle_sales.payment_form', compact('sale'));
+    }
+
+    // ======================= LƯU THU NỢ ==========================
+    public function storePayment(Request $request, VehicleSale $sale)
+    {
+        if ($resp = $this->authorizeModule('update')) return $resp;
+
+        $data = $request->validate([
+            'payment_date' => 'required|date',
+            'amount'       => 'required',
+            'method'       => 'required',
+            'note'         => 'nullable|string',
+        ]);
+
+        $amount = (int) preg_replace('/\D/', '', $data['amount']);
+
+        DB::transaction(function () use ($sale, $data, $amount) {
+
+            VehicleSalePayment::create([
+                'vehicle_sale_id' => $sale->id,
+                'amount'          => $amount,
+                'method'          => $data['method'],
+                'payment_date'    => $data['payment_date'],
+                'note'            => $data['note'] ?? "Thu nợ HĐ {$sale->code}",
+                'created_by'      => auth()->id(),
+            ]);
+
+            $totalPaid = $sale->payments()->sum('amount');
+            $debt      = max($sale->amount - $totalPaid, 0);
+
+            $status = $debt <= 0 ? 'paid' : ($totalPaid > 0 ? 'partial' : 'unpaid');
+
+            $sale->update([
+                'paid_amount'    => $totalPaid,
+                'debt_amount'    => $debt,
+                'payment_status' => $status,
+            ]);
         });
 
         return redirect()
             ->route('admin.vehicle_sales.show', $sale->id)
-            ->with('msg-success', 'Đã tạo hóa đơn bán lẻ: ' . $sale->code);
+            ->with('msg-success', 'Đã cập nhật thu nợ.');
     }
 
-    /**
-     * XEM HÓA ĐƠN BÁN LẺ (dùng luôn làm màn hình in)
-     */
-    public function show(VehicleSale $vehicleSale)
-    {
-        if ($resp = $this->authorizeModule('read')) {
-            return $resp;
-        }
-
-        $vehicleSale->load([
-            'vehicle.model.brand',
-            'vehicle.color',
-            'customer',
-            'payments',
-            'createdBy',
-        ]);
-
-        return view('backend.vehicle_sales.show', [
-            'sale' => $vehicleSale,
-        ]);
-    }
-
-    /**
-     * API: Tìm xe theo số khung (VIN)
-     * GET /admin/vehicle-sales/find-vehicle?frame_no=XXX
-     */
+    // ======================= API TÌM XE ==========================
     public function findVehicle(Request $request)
     {
-        if ($resp = $this->authorizeModule('read')) {
-            return $resp;
-        }
+        $frame = trim($request->frame_no);
 
-        $frameNo = trim($request->get('frame_no', ''));
-
-        if ($frameNo === '') {
-            return response()->json(['success' => false, 'message' => 'Vui lòng nhập số khung'], 400);
-        }
-
-        $vehicle = Vehicle::with(['model.brand', 'color', 'warehouse'])
-            ->where('frame_no', 'like', '%' . $frameNo . '%')
-            ->where(function ($q) {
-                $q->where('status', 0)
-                  ->orWhere('status', 'in_stock');
-            })
-            ->orderBy('frame_no')
+        $vehicle = Vehicle::with('model.brand','color','warehouse')
+            ->where('frame_no','like',"%$frame%")
+            ->whereIn('status',[0,'in_stock'])
             ->first();
 
-        if (!$vehicle) {
-            return response()->json(['success' => false, 'message' => 'Không tìm thấy xe phù hợp hoặc xe đã bán.'], 404);
-        }
-
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'id'           => $vehicle->id,
-                'frame_no'     => $vehicle->frame_no,
-                'engine_no'    => $vehicle->engine_no,
-                'model_name'   => optional($vehicle->model)->name,
-                'brand_name'   => optional(optional($vehicle->model)->brand)->name,
-                'color_name'   => optional($vehicle->color)->name,
-                'warehouse'    => optional($vehicle->warehouse)->name,
-                'purchase_price' => $vehicle->purchase_price ?? 0,
-                'suggest_price'  => $vehicle->sale_price ?? 0,
-                'license_plate'=> $vehicle->license_plate,
-            ]
-        ]);
+        return $vehicle
+            ? response()->json(['success'=>true,'vehicle'=>$vehicle])
+            : response()->json(['success'=>false],404);
     }
 
-    /**
-     * API: Tìm khách theo SĐT
-     * GET /admin/vehicle-sales/find-customer?phone=...
-     */
+    // ======================= API TÌM KHÁCH ==========================
     public function findCustomer(Request $request)
     {
-        if ($resp = $this->authorizeModule('read')) {
-            return $resp;
-        }
+        $customer = Customer::where('phone',$request->phone)->first();
 
-        $phone = trim($request->get('phone', ''));
+        return $customer
+            ? response()->json(['success'=>true,'customer'=>$customer])
+            : response()->json(['success'=>false],404);
+    }
 
-        if ($phone === '') {
-            return response()->json(['success' => false, 'message' => 'Vui lòng nhập số điện thoại'], 400);
-        }
-
-        $customer = Customer::where('phone', $phone)->first();
-
-        if (!$customer) {
-            return response()->json(['success' => false, 'message' => 'Khách mới, chưa có trong hệ thống.'], 404);
-        }
-
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'id'      => $customer->id,
-                'name'    => $customer->name,
-                'phone'   => $customer->phone,
-                'address' => $customer->address,
-                'note'    => $customer->note,
-            ]
+    // ======================= CẬP NHẬT BIỂN SỐ ==========================
+    public function updatePlate(Request $request)
+    {
+        $data = $request->validate([
+            'sale_id'       => 'required|exists:vehicle_sales,id',
+            'license_plate' => 'required|string|max:20',
         ]);
+
+        $sale = VehicleSale::with('vehicle')->findOrFail($data['sale_id']);
+        $sale->vehicle->license_plate = strtoupper($data['license_plate']);
+        $sale->vehicle->save();
+
+        return back()->with('msg-success','Đã cập nhật biển số.');
+    }
+
+    // ======================= IN HỢP ĐỒNG ==========================
+    public function print(VehicleSale $sale)
+    {
+        $sale->load('vehicle.model.brand','customer');
+
+        return Pdf::loadView('backend.vehicle_sales.print', compact('sale'))
+            ->setPaper('A5')
+            ->stream("HopDong_{$sale->code}.pdf");
     }
 }

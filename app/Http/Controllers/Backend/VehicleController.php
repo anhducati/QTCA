@@ -12,6 +12,7 @@ use App\Models\Supplier;
 use App\Models\ImportReceipt;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use App\Services\InventoryLogService; // <<< THÊM DÒNG NÀY
 
 class VehicleController extends Controller
 {
@@ -167,6 +168,9 @@ class VehicleController extends Controller
         $vehicle->license_plate  = $request->license_plate;
         $vehicle->note           = $request->note;
 
+        // chuẩn bị biến để log
+        $importReceiptForLog = null;
+
         // gắn với phiếu nhập nếu có
         if (!$request->filled('import_receipt_id')) {
             // Tạo phiếu nhập tự động
@@ -194,8 +198,12 @@ class VehicleController extends Controller
             $autoReceipt->save();
 
             $vehicle->import_receipt_id = $autoReceipt->id;
+            $importReceiptForLog = $autoReceipt;
         } else {
             $vehicle->import_receipt_id = $request->import_receipt_id;
+
+            // nếu anh truyền sẵn import_receipt_id thì cũng log theo phiếu đó
+            $importReceiptForLog = ImportReceipt::find($request->import_receipt_id);
         }
 
         // Mặc định 2 cờ
@@ -205,6 +213,15 @@ class VehicleController extends Controller
         $vehicle->registration_received_at = null;
 
         $vehicle->save();
+
+        // GHI NHẬT KÝ TỒN KHO (nhập kho thủ công / gắn vào PNK sẵn)
+        if ($importReceiptForLog) {
+            InventoryLogService::logImport(
+                $vehicle,
+                $importReceiptForLog,
+                'Nhập xe từ màn hình quản lý xe'
+            );
+        }
 
         return redirect()
             ->route('admin.vehicles.index')
@@ -433,6 +450,13 @@ class VehicleController extends Controller
 
             $vehicle->save();
             $count++;
+
+            // GHI NHẬT KÝ TỒN KHO CHO TỪNG XE
+            InventoryLogService::logImport(
+                $vehicle,
+                $importReceipt,
+                'Nhập xe vào phiếu ' . $importReceipt->code
+            );
         }
 
         if ($count == 0) {
@@ -448,10 +472,6 @@ class VehicleController extends Controller
     }
 
     /**
-     * KẾT THÚC DEMO → CHO XE VỀ KHO (CÁCH 1)
-     * - Chỉ cho phép khi status = 'demo'
-     */
-       /**
      * KẾT THÚC DEMO → CHO XE VỀ TRONG KHO
      * - Chỉ áp dụng cho xe đang ở trạng thái demo / demo_out
      * - Cho phép đổi kho nếu muốn
@@ -483,25 +503,40 @@ class VehicleController extends Controller
         $vehicle->status = 'in_stock';
 
         // Đảm bảo không dính dữ liệu bán lẻ nào
-        $vehicle->sale_price = null;
-        $vehicle->sale_date  = null;
+        $vehicle->sale_price  = null;
+        $vehicle->sale_date   = null;
         $vehicle->customer_id = null;
 
         // Ghi chú thêm nếu có
         if (!empty($data['note'])) {
-            // nối thêm ghi chú cũ cho dễ theo dõi lịch sử
             $oldNote = $vehicle->note ? ($vehicle->note . " | ") : "";
             $vehicle->note = $oldNote . '[Kết thúc demo] ' . $data['note'];
         }
 
         $vehicle->save();
 
+        // ===== GHI NHẬT KÝ TỒN KHO (xe demo quay lại kho) =====
+        // Dùng phiếu nhập gốc nếu có
+        if ($vehicle->import_receipt_id) {
+            $importReceiptForLog = ImportReceipt::find($vehicle->import_receipt_id);
+
+            if ($importReceiptForLog) {
+                InventoryLogService::logImport(
+                    $vehicle,
+                    $importReceiptForLog,
+                    'Kết thúc DEMO, xe quay lại kho'
+                );
+            }
+        }
+
         return redirect()
             ->route('admin.vehicles.index')
             ->with('msg-success', 'Đã kết thúc DEMO, xe đã được chuyển về trạng thái TRONG KHO.');
     }
 
-
+    /**
+     * CHI TIẾT XE
+     */
     public function show($id)
     {
         if ($resp = $this->authorizeModule('read')) {
@@ -516,7 +551,7 @@ class VehicleController extends Controller
             'importReceipt.supplier',
             'importReceipt.warehouse',
             'exportReceiptItems.exportReceipt.supplier',
-            'retailSale.customer',   // <<< quan trọng
+            'retailSale.customer',   // hóa đơn bán lẻ (nếu có)
         ])->findOrFail($id);
 
         // Lấy phiếu xuất gần nhất (nếu có)
@@ -531,7 +566,4 @@ class VehicleController extends Controller
 
         return view('backend.vehicles.show', compact('vehicle', 'lastExport'));
     }
-
-
-
 }

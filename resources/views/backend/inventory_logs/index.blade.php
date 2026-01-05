@@ -7,7 +7,7 @@
     <div class="col-lg-8">
         <h2>Nhật ký tồn kho</h2>
         <ol class="breadcrumb">
-            <li><a href="{{ route('admin.dashboard') }}">Dashboard</a></li>
+            <li><a href="">Dashboard</a></li>
             <li class="active"><strong>Nhật ký tồn kho</strong></li>
         </ol>
     </div>

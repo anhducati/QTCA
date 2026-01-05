@@ -138,19 +138,23 @@
 
                                     @php
                                         $modules = [
-                                            'brands'                => 'Hãng xe',
-                                            'models'                => 'Dòng xe',
-                                            'colors'                => 'Màu xe',
-                                            'warehouses'            => 'Kho',
-                                            'suppliers'             => 'Nhà cung cấp',
-                                            'customers'             => 'Khách hàng',
-                                            'vehicles'              => 'Xe',
-                                            'import_receipts'       => 'Phiếu nhập',
-                                            'export_receipts'       => 'Phiếu xuất',
-                                            'payments'              => 'Phiếu thu',
-                                            'stock_takes'           => 'Kiểm kê',
-                                            'inventory_adjustments' => 'Điều chỉnh tồn',
-                                            'inventory_logs'        => 'Nhật ký tồn kho',
+                                        'dashboard'             => 'Trang tổng quan (Dashboard)',
+                                        'brands'                => 'Hãng xe',
+                                        'models'                => 'Dòng xe',
+                                        'colors'                => 'Màu xe',
+                                        'warehouses'            => 'Kho',
+                                        'suppliers'             => 'Nhà cung cấp',
+                                        'customers'             => 'Khách hàng',
+                                        'vehicles'              => 'Xe',
+
+                                        'import_receipts'       => 'Phiếu nhập',
+                                        'export_receipts'       => 'Phiếu xuất',
+                                        'payments'              => 'Phiếu thu',
+                                        'stock_takes'           => 'Kiểm kê',
+                                        'inventory_adjustments' => 'Điều chỉnh tồn',
+                                        'inventory_logs'        => 'Nhật ký tồn kho',
+
+                                        'vehicle_sales'         => 'Bán lẻ xe',     // 👈 THÊM DÒNG NÀY
                                         ];
 
                                         // Nếu validate lỗi, ưu tiên dữ liệu old('permissions') để tích lại checkbox

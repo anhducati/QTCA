@@ -20,26 +20,27 @@ class InventoryLog extends Model
         'created_by',
     ];
 
-    // Xe liên quan
+    protected $casts = [
+        'log_date' => 'datetime',
+    ];
+
+    // Quan hệ
     public function vehicle()
     {
         return $this->belongsTo(Vehicle::class);
     }
 
-    // Kho xuất
     public function fromWarehouse()
     {
         return $this->belongsTo(Warehouse::class, 'from_warehouse_id');
     }
 
-    // Kho nhập
     public function toWarehouse()
     {
         return $this->belongsTo(Warehouse::class, 'to_warehouse_id');
     }
 
-    // Người tạo log
-    public function createdBy()
+    public function creator()
     {
         return $this->belongsTo(User::class, 'created_by');
     }

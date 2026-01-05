@@ -31,6 +31,9 @@ use App\Http\Controllers\Backend\StockTakeController;
 use App\Http\Controllers\Backend\InventoryAdjustmentController;
 use App\Http\Controllers\Backend\InventoryLogController;
 
+use App\Http\Controllers\Backend\VehicleSaleController;
+
+
 
 
 /*
@@ -91,8 +94,13 @@ Route::prefix('admin')->group(function () {
     Route::middleware('check.login')->group(function () {
 
         // Dashboard
+        
+      
+         // Dashboard
         Route::get('/', [DashboardController::class, 'index'])
-            ->name('admin.dashboard');
+            ->name('admin.dashboard')
+            ->middleware('module_permission:dashboard,read');
+
 
         // Đổi mật khẩu
         Route::post('/changePassword', [UserController::class, 'changePassword'])
@@ -571,59 +579,65 @@ Route::prefix('admin')->group(function () {
             ->name('admin.inventory_logs.show')
             ->middleware('module_permission:inventory_logs,read');
 
-    
-   
+            // Danh sách hoá đơn
+            // URL: /admin/danh-sach-ban-xe
+            Route::get('danh-sach-ban-xe', [VehicleSaleController::class, 'index'])
+                ->name('admin.vehicle_sales.index')
+                ->middleware('module_permission:vehicle_sales,read');
 
-    // ================== BÁN LẺ XE ==================
+            // Form tạo mới
+            // URL: /admin/tao-hoa-don-ban-xe
+            Route::get('tao-hoa-don-ban-xe', [VehicleSaleController::class, 'create'])
+                ->name('admin.vehicle_sales.create')
+                ->middleware('module_permission:vehicle_sales,create');
 
-    // Danh sách HĐ bán lẻ
-    Route::get('/ban-le', [ExportReceiptController::class, 'indexRetail'])
-        ->name('admin.vehicle_sales.index')
-        ->middleware('module_permission:vehicle_sales,read');
+            // Lưu HĐ mới
+            // URL: /admin/luu-hoa-don-ban-xe
+            Route::post('luu-hoa-don-ban-xe', [VehicleSaleController::class, 'store'])
+                ->name('admin.vehicle_sales.store')
+                ->middleware('module_permission:vehicle_sales,create');
 
-    // Form tạo HĐ bán lẻ
-    Route::get('/ban-le/tao-moi', [ExportReceiptController::class, 'createRetail'])
-        ->name('admin.vehicle_sales.create')
-        ->middleware('module_permission:vehicle_sales,create');
+            // Xem chi tiết
+            // URL: /admin/hoa-don-ban-xe/{sale}
+            Route::get('hoa-don-ban-xe/{sale}', [VehicleSaleController::class, 'show'])
+                ->name('admin.vehicle_sales.show')
+                ->middleware('module_permission:vehicle_sales,read');
 
-    // Lưu HĐ bán lẻ
-    Route::post('/ban-le', [ExportReceiptController::class, 'storeRetail'])
-        ->name('admin.vehicle_sales.store')
-        ->middleware('module_permission:vehicle_sales,create');
+            // Form thu nợ
+            // URL: /admin/hoa-don-ban-xe/{sale}/thu-no
+            Route::get('hoa-don-ban-xe/{sale}/thu-no', [VehicleSaleController::class, 'createPayment'])
+                ->name('admin.vehicle_sales.payments.create')
+                ->middleware('module_permission:vehicle_sales,update');
 
-    // Xem chi tiết HĐ bán lẻ
-    Route::get('/ban-le/{vehicleSale}', [ExportReceiptController::class, 'showRetail'])
-        ->name('admin.vehicle_sales.show')
-        ->middleware('module_permission:vehicle_sales,read');
+            // Lưu thu nợ
+            // URL: /admin/hoa-don-ban-xe/{sale}/luu-thu-no
+            Route::post('hoa-don-ban-xe/{sale}/luu-thu-no', [VehicleSaleController::class, 'storePayment'])
+                ->name('admin.vehicle_sales.payments.store')
+                ->middleware('module_permission:vehicle_sales,update');
 
-    // Form thu nợ / trả góp
-    Route::get('/ban-le/{vehicleSale}/chi-tiet', [ExportReceiptController::class, 'createRetailPayment'])
-        ->name('admin.vehicle_sales.payments.create')
-        ->middleware('module_permission:vehicle_sales,update');
+            // API tìm xe
+            // URL: /admin/api/ban-xe/tim-xe
+            Route::get('api/ban-xe/tim-xe', [VehicleSaleController::class, 'findVehicle'])
+                ->name('admin.vehicle_sales.find_vehicle')
+                ->middleware('module_permission:vehicle_sales,read');
 
-    // Lưu phiếu thu nợ / trả góp
-    Route::post('/ban-le/{vehicleSale}/chi-tiet', [ExportReceiptController::class, 'storeRetailPayment'])
-        ->name('admin.vehicle_sales.payments.store')
-        ->middleware('module_permission:vehicle_sales,update');
+            // API tìm khách
+            // URL: /admin/api/ban-xe/tim-khach
+            Route::get('api/ban-xe/tim-khach', [VehicleSaleController::class, 'findCustomer'])
+                ->name('admin.vehicle_sales.find_customer')
+                ->middleware('module_permission:vehicle_sales,read');
 
-    // API bán lẻ
-    Route::get('/ban-le/api/find-vehicle', [ExportReceiptController::class, 'findRetailVehicle'])
-        ->name('admin.vehicle_sales.find_vehicle')
-        ->middleware('module_permission:vehicle_sales,read');
+            // Cập nhật biển số
+            // URL: /admin/cap-nhat-bien-so-ban-xe
+            Route::post('cap-nhat-bien-so-ban-xe', [VehicleSaleController::class, 'updatePlate'])
+                ->name('admin.vehicle_sales.update_plate')
+                ->middleware('module_permission:vehicle_sales,update');
 
-    Route::get('/ban-le/api/find-customer', [ExportReceiptController::class, 'findRetailCustomer'])
-        ->name('admin.vehicle_sales.find_customer')
-        ->middleware('module_permission:vehicle_sales,read');
-
-
-    Route::post('/ban-le/update-plate', [ExportReceiptController::class, 'updateRetailPlate'])
-    ->name('admin.vehicle_sales.update_plate')
-    ->middleware('module_permission:vehicles,update');
-    // In hợp đồng bán lẻ
-
-     Route::get('/ban-le/{sale}/print', [ExportReceiptController::class, 'printRetail'])
-            ->name('admin.vehicle_sales.print')
-            ->middleware('module_permission:vehicle_sales,read');
+            // In hợp đồng
+            // URL: /admin/hoa-don-ban-xe/{sale}/in-hop-dong
+            Route::get('hoa-don-ban-xe/{sale}/in-hop-dong', [VehicleSaleController::class, 'print'])
+                ->name('admin.vehicle_sales.print')
+                ->middleware('module_permission:vehicle_sales,read');
 
 
     }); // END check.login group
