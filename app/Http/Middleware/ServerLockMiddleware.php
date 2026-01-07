@@ -3,39 +3,32 @@
 namespace App\Http\Middleware;
 
 use Closure;
-use Illuminate\Support\Facades\Cache;
+use Illuminate\Http\Request;
+use App\Services\ServerStateService;
 use App\Services\TelegramService;
 
 class ServerLockMiddleware
 {
-    public function handle($request, Closure $next)
+    public function handle(Request $request, Closure $next)
     {
-        if (Cache::get('server_off')) {
-
-            // 🔑 Link bí mật mở server
-            if ($request->query('unlock') === env('SERVER_SECRET_KEY')) {
-
-                Cache::forget('server_off');
-                Cache::forget('server_off_time');
-
-                $ip = $request->ip();
-                $time = now()->format('H:i:s d/m/Y');
-
-                // 📣 Báo Telegram
-                TelegramService::send(
-                    "🔓 <b>SERVER ĐƯỢC MỞ BẰNG LINK BÍ MẬT</b>\n".
-                    "🕒 {$time}\n".
-                    "🌐 IP mở khóa: {$ip}"
-                );
-
-                return response('✅ Server đã mở lại', 200);
-            }
-
-            // ⛔ Server đang OFF → giả lỗi Cloudflare
-            return response()
-                ->view('errors.server_off', [], 500);
+        if (!ServerStateService::isServerOff()) {
+            return $next($request);
         }
 
-        return $next($request);
+        // Link bí mật mở server: ?unlock=SERVER_SECRET_KEY
+        if ($request->query('unlock') === env('SERVER_SECRET_KEY')) {
+
+            ServerStateService::setServerOff(false);
+
+            TelegramService::send(
+                "🔓 <b>SERVER ĐÃ ĐƯỢC MỞ BẰNG LINK BÍ MẬT</b>\n".
+                "🕒 ".now()->format('H:i:s d/m/Y')."\n".
+                "🌐 IP mở khóa: ".$request->ip()
+            );
+
+            return response('✅ Server đã mở lại', 200);
+        }
+
+        return response()->view('server-off', [], 503);
     }
 }

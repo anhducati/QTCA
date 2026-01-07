@@ -10,7 +10,7 @@ class PanicMiddleware
     public function handle($request, Closure $next)
     {
         if (Cache::has('panic')) {
-            return response()->view('errors.panic', [], 500);
+            return response()->view('errors.server_off', [], 500);
         }
 
         return $next($request);

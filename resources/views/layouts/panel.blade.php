@@ -173,6 +173,8 @@ document.addEventListener('DOMContentLoaded', function () {
         new Chart(ctx, {type: 'line', data: lineData});
     });
 </script>
+@stack('scripts')
+
 
 </body>
 </html>

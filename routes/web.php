@@ -1,15 +1,15 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 // ====== AUTH CONTROLLERS ======
 use App\Http\Controllers\Backend\AuthController;
 use App\Http\Controllers\Client\AuthController as ClientAuthController;
 
-// ====== SYSTEM CONTROLLERS ======
-use App\Http\Controllers\LanguageController;
-
 // ====== BACKEND CONTROLLERS ======
+use App\Http\Controllers\Backend\SecurityController;
 use App\Http\Controllers\Backend\DashboardController;
 use App\Http\Controllers\Backend\UserController;
 use App\Http\Controllers\Backend\CategoryController;
@@ -30,40 +30,48 @@ use App\Http\Controllers\Backend\PaymentController;
 use App\Http\Controllers\Backend\StockTakeController;
 use App\Http\Controllers\Backend\InventoryAdjustmentController;
 use App\Http\Controllers\Backend\InventoryLogController;
-
 use App\Http\Controllers\Backend\VehicleSaleController;
 
+// ====== TELEGRAM ======
+use App\Http\Controllers\TelegramController;
+
+/*
+|--------------------------------------------------------------------------
+| TELEGRAM WEBHOOK
+|--------------------------------------------------------------------------
+| Telegram sẽ POST vào đây -> phải bỏ CSRF để không bị 419.
+| Khuyến nghị: bạn nên check secret token trong TelegramController.
+*/
+Route::post('/telegram/webhook', [TelegramController::class, 'handle'])
+    ->name('telegram.webhook')
+    ->withoutMiddleware([\App\Http\Middleware\VerifyCsrfToken::class]);
 
 use App\Services\TelegramService;
 
-Route::get('/test-telegram', function () {
-    TelegramService::send("✅ TEST từ Laravel OK");
-    return 'sent';
-});
 Route::get('/unlock', function (Request $request) {
+    $key = (string) $request->query('key', '');
+    $secret = (string) env('SERVER_SECRET_KEY', '');
 
-    $key = $request->query('key');
-
-    if ($key !== config('app.server_unlock_key')) {
+    if ($secret === '' || !hash_equals($secret, $key)) {
         abort(403);
     }
 
     Cache::forget('server_off');
+    Cache::forget('server_off_time');
+    Cache::forget('panic');
+    Cache::forget('panic_time');
+
+    TelegramService::send("🔓 <b>SERVER ĐÃ MỞ BẰNG LINK</b>\n🕒 ".now()->format('H:i:s d/m/Y'));
 
     return '✅ SERVER ĐÃ MỞ';
-});
-
-use App\Http\Controllers\TelegramController;
-
-Route::post('/telegram/webhook', [TelegramController::class, 'handle']);
-
+})->name('server.unlock');
 
 /*
 |--------------------------------------------------------------------------
 | CLIENT LOGIN
 |--------------------------------------------------------------------------
+| FIX: tránh trùng name('client.login')
 */
-
 Route::get('/', [ClientAuthController::class, 'login'])
     ->name('client.login');
 
@@ -71,42 +79,38 @@ Route::post('/', [ClientAuthController::class, 'handle_login'])
     ->name('client.login.post');
 
 Route::get('/dang-nhap', [ClientAuthController::class, 'login'])
-    ->name('client.login');
+    ->name('client.login.form');
 
-Route::post('/dang-nhap', [ClientAuthController::class, 'handle_login']);
+Route::post('/dang-nhap', [ClientAuthController::class, 'handle_login'])
+    ->name('client.login.submit');
 
 Route::get('/quen-mat-khau', [ClientAuthController::class, 'forgot'])
     ->name('client.forgot');
 
-Route::post('/quen-mat-khau', [ClientAuthController::class, 'handle_forgot']);
+Route::post('/quen-mat-khau', [ClientAuthController::class, 'handle_forgot'])
+    ->name('client.forgot.post');
 
 Route::get('/reset/{token}', [ClientAuthController::class, 'reset_password'])
     ->name('client.reset');
 
-Route::post('/reset/{token}', [ClientAuthController::class, 'handle_reset_password']);
-
-Route::post('/change-language', [LanguageController::class, 'changeLanguage'])
-    ->name('change.language');
-
-
+Route::post('/reset/{token}', [ClientAuthController::class, 'handle_reset_password'])
+    ->name('client.reset.post');
 
 /*
 |--------------------------------------------------------------------------
 | ADMIN LOGIN
 |--------------------------------------------------------------------------
 */
-
 Route::prefix('admin')->group(function () {
 
     Route::get('/login', [AuthController::class, 'login'])
         ->name('admin.login');
 
-    Route::post('/login', [AuthController::class, 'handleLogin']);
+    Route::post('/login', [AuthController::class, 'handleLogin'])
+        ->name('admin.login.post');
 
     Route::get('/logout', [AuthController::class, 'logout'])
         ->name('admin.logout');
-
-
 
     /*
     |--------------------------------------------------------------------------
@@ -116,18 +120,13 @@ Route::prefix('admin')->group(function () {
     Route::middleware('check.login')->group(function () {
 
         // Dashboard
-        
-      
-         // Dashboard
         Route::get('/', [DashboardController::class, 'index'])
             ->name('admin.dashboard')
             ->middleware('module_permission:dashboard,read');
 
-
         // Đổi mật khẩu
         Route::post('/changePassword', [UserController::class, 'changePassword'])
             ->name('admin.user.changepassword');
-
 
         /*
         |--------------------------------------------------------------------------
@@ -136,68 +135,30 @@ Route::prefix('admin')->group(function () {
         */
         Route::middleware('admin')->group(function () {
 
-            Route::get('/user', [UserController::class, 'index'])->name('admin.user.index');
-            Route::get('/user/create', [UserController::class, 'create_user'])->name('admin.user.create');
-            Route::post('/user/create', [UserController::class, 'handle_create_user']);
+            Route::get('/user', [UserController::class, 'index'])
+                ->name('admin.user.index');
 
-            Route::get('/user/update/{id}', [UserController::class, 'update_user'])->name('admin.user.update');
-            Route::put('/user/update/{id}', [UserController::class, 'handle_update_user'])->name('admin.user.update');
+            Route::get('/user/create', [UserController::class, 'create_user'])
+                ->name('admin.user.create');
 
-            Route::get('/user/delete/{id}', [UserController::class, 'delete_user'])->name('admin.user.delete');
+            Route::post('/user/create', [UserController::class, 'handle_create_user'])
+                ->name('admin.user.store');
+
+            Route::get('/user/update/{id}', [UserController::class, 'update_user'])
+                ->name('admin.user.edit');
+
+            Route::put('/user/update/{id}', [UserController::class, 'handle_update_user'])
+                ->name('admin.user.update');
+
+            Route::delete('/user/delete/{id}', [UserController::class, 'delete_user'])
+                ->name('admin.user.delete');
         });
 
-
-
         /*
         |--------------------------------------------------------------------------
-        | BLOG - CATEGORY - MAJORS (DỰ ÁN CŨ)
+        | HỆ THỐNG QUẢN LÝ NHẬP - XUẤT - XE (GIỮ NGUYÊN CỦA BẠN)
         |--------------------------------------------------------------------------
         */
-
-        // CATEGORY
-        Route::get('/category', [CategoryController::class, 'index'])->name('admin.category.index');
-        Route::get('/category/create', [CategoryController::class, 'create_category'])->name('admin.category.create');
-        Route::post('/category/create', [CategoryController::class, 'handle_create_category']);
-
-        Route::get('/category/update/{id}', [CategoryController::class, 'update_category'])->name('admin.category.update');
-        Route::put('/category/update/{id}', [CategoryController::class, 'handle_update_category'])->name('admin.category.update');
-
-        Route::get('/category/delete/{id}', [CategoryController::class, 'delete_category'])->name('admin.category.delete');
-
-
-        // BLOG
-        Route::get('/blog', [BlogController::class, 'blog'])->name('admin.blog');
-        Route::get('/blog/recycle', [BlogController::class, 'recycle'])->name('admin.blog.recycle');
-        Route::get('/blog/create', [BlogController::class, 'create_blog'])->name('admin.blog.create');
-        Route::post('/blog/create', [BlogController::class, 'handle_create_blog']);
-
-        Route::get('/blog/update/{id}', [BlogController::class, 'update_blog'])->name('admin.blog.update');
-        Route::put('/blog/update/{id}', [BlogController::class, 'handle_update_blog']);
-
-        Route::get('/blog/delete/{id}', [BlogController::class, 'delete_blog'])->name('admin.blog.delete');
-        Route::get('/blog/restore/{id}', [BlogController::class, 'restore'])->name('admin.blog.restore');
-
-        Route::get('/blog/force-delete/{id}', [BlogController::class, 'force_delete'])->name('admin.blog.force-delete');
-
-
-        // MAJORS
-        Route::get('/majors', [MajorController::class, 'major'])->name('admin.major');
-        Route::get('/majors/create', [MajorController::class, 'create_major'])->name('admin.major.create');
-        Route::post('/majors/create', [MajorController::class, 'handle_create_major']);
-
-        Route::get('/majors/{id}/update', [MajorController::class, 'update_major'])->name('admin.major.update');
-        Route::put('/majors/{id}/update', [MajorController::class, 'handle_update_major']);
-
-        Route::get('/majors/{id}/delete', [MajorController::class, 'delete_major'])->name('admin.major.delete');
-
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | HỆ THỐNG QUẢN LÝ NHẬP - XUẤT - XE (FULL ROUTES TIẾNG VIỆT)
-        |--------------------------------------------------------------------------
-        */
-
 
         // ===== Hãng xe =====
         Route::get('/hang-xe', [BrandController::class, 'index'])
@@ -342,6 +303,10 @@ Route::prefix('admin')->group(function () {
             ->name('admin.customers.store')
             ->middleware('module_permission:customers,create');
 
+        Route::get('/khach-hang/{customer}', [CustomerController::class, 'show'])
+            ->name('admin.customers.show')
+            ->middleware('module_permission:customers,read');
+
         Route::get('/khach-hang/{customer}/sua', [CustomerController::class, 'edit'])
             ->name('admin.customers.edit')
             ->middleware('module_permission:customers,update');
@@ -354,38 +319,8 @@ Route::prefix('admin')->group(function () {
             ->name('admin.customers.destroy')
             ->middleware('module_permission:customers,delete');
 
-        Route::get('/khach-hang/{customer}', [CustomerController::class, 'show'])
-            ->name('admin.customers.show')
-            ->middleware('module_permission:customers,read');
-
 
         // ===== Xe =====
-        // Route::get('/xe', [VehicleController::class, 'index'])
-        //     ->name('admin.vehicles.index')
-        //     ->middleware('module_permission:vehicles,read');
-
-        // Route::get('/xe/tao-moi', [VehicleController::class, 'create'])
-        //     ->name('admin.vehicles.create')
-        //     ->middleware('module_permission:vehicles,create');
-
-        // Route::post('/xe', [VehicleController::class, 'store'])
-        //     ->name('admin.vehicles.store')
-        //     ->middleware('module_permission:vehicles,create');
-
-        // Route::get('/xe/{vehicle}/sua', [VehicleController::class, 'edit'])
-        //     ->name('admin.vehicles.edit')
-        //     ->middleware('module_permission:vehicles,update');
-
-        // Route::put('/xe/{vehicle}', [VehicleController::class, 'update'])
-        //     ->name('admin.vehicles.update')
-        //     ->middleware('module_permission:vehicles,update');
-
-        // Route::delete('/xe/{vehicle}', [VehicleController::class, 'destroy'])
-        //     ->name('admin.vehicles.destroy')
-        //     ->middleware('module_permission:vehicles,delete');
-
-
-                // Xe
         Route::get('/xe', [VehicleController::class, 'index'])
             ->name('admin.vehicles.index')
             ->middleware('module_permission:vehicles,read');
@@ -414,7 +349,6 @@ Route::prefix('admin')->group(function () {
             ->name('admin.vehicles.destroy')
             ->middleware('module_permission:vehicles,delete');
 
-        // Kết thúc demo
         Route::post('/xe/{vehicle}/ket-thuc-demo', [VehicleController::class, 'endDemo'])
             ->name('admin.vehicles.end_demo')
             ->middleware('module_permission:vehicles,update');
@@ -449,29 +383,21 @@ Route::prefix('admin')->group(function () {
             ->name('admin.import_receipts.destroy')
             ->middleware('module_permission:import_receipts,delete');
 
-                    // *** Thêm xe trong phiếu nhập (chỉ ai có quyền tạo xe mới được dùng) ***
         Route::get('/phieu-nhap/{importReceipt}/them-xe', [VehicleController::class, 'createForImport'])
             ->name('admin.import_receipts.vehicles.create')
             ->middleware('module_permission:vehicles,create');
 
         Route::post('/phieu-nhap/{importReceipt}/them-xe', [VehicleController::class, 'storeForImport'])
             ->name('admin.import_receipts.vehicles.store')
-            ->middleware('module_permission:vehicles,create');    
+            ->middleware('module_permission:vehicles,create');
 
-        // ĐÁNH DẤU ĐÃ THANH TOÁN
-            //
-            Route::post('/phieu-nhap/{importReceipt}/da-thanh-toan', 
-                [ImportReceiptController::class, 'markPaid'])
-                ->name('admin.import_receipts.mark_paid')
-                ->middleware('module_permission:import_receipts,update');
+        Route::post('/phieu-nhap/{importReceipt}/da-thanh-toan', [ImportReceiptController::class, 'markPaid'])
+            ->name('admin.import_receipts.mark_paid')
+            ->middleware('module_permission:import_receipts,update');
 
-            //
-            // ĐÁNH DẤU ĐÃ NHẬN GIẤY TỜ
-            //
-            Route::post('/phieu-nhap/{importReceipt}/da-nhan-giay-to', 
-                [ImportReceiptController::class, 'markDocsReceived'])
-                ->name('admin.import_receipts.mark_docs_received')
-                ->middleware('module_permission:import_receipts,update');
+        Route::post('/phieu-nhap/{importReceipt}/da-nhan-giay-to', [ImportReceiptController::class, 'markDocsReceived'])
+            ->name('admin.import_receipts.mark_docs_received')
+            ->middleware('module_permission:import_receipts,update');
 
 
         // ===== Phiếu xuất =====
@@ -503,18 +429,16 @@ Route::prefix('admin')->group(function () {
             ->name('admin.export_receipts.destroy')
             ->middleware('module_permission:export_receipts,delete');
 
-        Route::post('/phieu-xuat/{exportReceipt}/nhan-tien', 
-            [ExportReceiptController::class, 'markPaid'])
+        Route::post('/phieu-xuat/{exportReceipt}/nhan-tien', [ExportReceiptController::class, 'markPaid'])
             ->name('admin.export_receipts.mark_paid')
             ->middleware('module_permission:export_receipts,update');
 
-        Route::post('/phieu-xuat/{exportReceipt}/giao-giay-to', 
-            [ExportReceiptController::class, 'markDocsDelivered'])
+        Route::post('/phieu-xuat/{exportReceipt}/giao-giay-to', [ExportReceiptController::class, 'markDocsDelivered'])
             ->name('admin.export_receipts.mark_docs_delivered')
             ->middleware('module_permission:export_receipts,update');
 
 
-        // ===== Phiếu thu (Payment) =====
+        // ===== Phiếu thu =====
         Route::get('/phieu-thu', [PaymentController::class, 'index'])
             ->name('admin.payments.index')
             ->middleware('module_permission:payments,read');
@@ -561,13 +485,10 @@ Route::prefix('admin')->group(function () {
             ->name('admin.stock_takes.destroy')
             ->middleware('module_permission:stock_takes,delete');
 
-
-        // ➕ CẬP NHẬT DANH SÁCH DÒNG KIỂM KÊ (nếu anh dùng nút Lưu danh sách)
         Route::post('/kiem-ke/{stockTake}/cap-nhat-dong', [StockTakeController::class, 'updateItems'])
             ->name('admin.stock_takes.update_items')
             ->middleware('module_permission:stock_takes,update');
 
-        // ✅ XÁC NHẬN PHIẾU KIỂM KÊ (đổi status từ draft -> confirmed)
         Route::post('/kiem-ke/{stockTake}/xac-nhan', [StockTakeController::class, 'confirm'])
             ->name('admin.stock_takes.confirm')
             ->middleware('module_permission:stock_takes,update');
@@ -591,7 +512,6 @@ Route::prefix('admin')->group(function () {
             ->middleware('module_permission:inventory_adjustments,create');
 
 
-
         // ===== Nhật ký tồn kho =====
         Route::get('/nhat-ky-kho', [InventoryLogController::class, 'index'])
             ->name('admin.inventory_logs.index')
@@ -601,67 +521,70 @@ Route::prefix('admin')->group(function () {
             ->name('admin.inventory_logs.show')
             ->middleware('module_permission:inventory_logs,read');
 
-            // Danh sách hoá đơn
-            // URL: /admin/danh-sach-ban-xe
-            Route::get('danh-sach-ban-xe', [VehicleSaleController::class, 'index'])
-                ->name('admin.vehicle_sales.index')
-                ->middleware('module_permission:vehicle_sales,read');
 
-            // Form tạo mới
-            // URL: /admin/tao-hoa-don-ban-xe
-            Route::get('tao-hoa-don-ban-xe', [VehicleSaleController::class, 'create'])
-                ->name('admin.vehicle_sales.create')
-                ->middleware('module_permission:vehicle_sales,create');
+        // ===== Bán xe =====
+        Route::get('danh-sach-ban-xe', [VehicleSaleController::class, 'index'])
+            ->name('admin.vehicle_sales.index')
+            ->middleware('module_permission:vehicle_sales,read');
 
-            // Lưu HĐ mới
-            // URL: /admin/luu-hoa-don-ban-xe
-            Route::post('luu-hoa-don-ban-xe', [VehicleSaleController::class, 'store'])
-                ->name('admin.vehicle_sales.store')
-                ->middleware('module_permission:vehicle_sales,create');
+        Route::get('tao-hoa-don-ban-xe', [VehicleSaleController::class, 'create'])
+            ->name('admin.vehicle_sales.create')
+            ->middleware('module_permission:vehicle_sales,create');
 
-            // Xem chi tiết
-            // URL: /admin/hoa-don-ban-xe/{sale}
-            Route::get('hoa-don-ban-xe/{sale}', [VehicleSaleController::class, 'show'])
-                ->name('admin.vehicle_sales.show')
-                ->middleware('module_permission:vehicle_sales,read');
+        Route::post('luu-hoa-don-ban-xe', [VehicleSaleController::class, 'store'])
+            ->name('admin.vehicle_sales.store')
+            ->middleware('module_permission:vehicle_sales,create');
 
-            // Form thu nợ
-            // URL: /admin/hoa-don-ban-xe/{sale}/thu-no
-            Route::get('hoa-don-ban-xe/{sale}/thu-no', [VehicleSaleController::class, 'createPayment'])
-                ->name('admin.vehicle_sales.payments.create')
-                ->middleware('module_permission:vehicle_sales,update');
+        Route::get('hoa-don-ban-xe/{sale}', [VehicleSaleController::class, 'show'])
+            ->name('admin.vehicle_sales.show')
+            ->middleware('module_permission:vehicle_sales,read');
 
-            // Lưu thu nợ
-            // URL: /admin/hoa-don-ban-xe/{sale}/luu-thu-no
-            Route::post('hoa-don-ban-xe/{sale}/luu-thu-no', [VehicleSaleController::class, 'storePayment'])
-                ->name('admin.vehicle_sales.payments.store')
-                ->middleware('module_permission:vehicle_sales,update');
+        Route::get('hoa-don-ban-xe/{sale}/thu-no', [VehicleSaleController::class, 'createPayment'])
+            ->name('admin.vehicle_sales.payments.create')
+            ->middleware('module_permission:vehicle_sales,update');
 
-            // API tìm xe
-            // URL: /admin/api/ban-xe/tim-xe
-            Route::get('api/ban-xe/tim-xe', [VehicleSaleController::class, 'findVehicle'])
-                ->name('admin.vehicle_sales.find_vehicle')
-                ->middleware('module_permission:vehicle_sales,read');
+        Route::post('hoa-don-ban-xe/{sale}/luu-thu-no', [VehicleSaleController::class, 'storePayment'])
+            ->name('admin.vehicle_sales.payments.store')
+            ->middleware('module_permission:vehicle_sales,update');
 
-            // API tìm khách
-            // URL: /admin/api/ban-xe/tim-khach
-            Route::get('api/ban-xe/tim-khach', [VehicleSaleController::class, 'findCustomer'])
-                ->name('admin.vehicle_sales.find_customer')
-                ->middleware('module_permission:vehicle_sales,read');
+        Route::get('api/ban-xe/tim-xe', [VehicleSaleController::class, 'findVehicle'])
+            ->name('admin.vehicle_sales.find_vehicle')
+            ->middleware('module_permission:vehicle_sales,read');
 
-            // Cập nhật biển số
-            // URL: /admin/cap-nhat-bien-so-ban-xe
-            Route::post('cap-nhat-bien-so-ban-xe', [VehicleSaleController::class, 'updatePlate'])
-                ->name('admin.vehicle_sales.update_plate')
-                ->middleware('module_permission:vehicle_sales,update');
+        Route::get('api/ban-xe/tim-khach', [VehicleSaleController::class, 'findCustomer'])
+            ->name('admin.vehicle_sales.find_customer')
+            ->middleware('module_permission:vehicle_sales,read');
 
-            // In hợp đồng
-            // URL: /admin/hoa-don-ban-xe/{sale}/in-hop-dong
-            Route::get('hoa-don-ban-xe/{sale}/in-hop-dong', [VehicleSaleController::class, 'print'])
-                ->name('admin.vehicle_sales.print')
-                ->middleware('module_permission:vehicle_sales,read');
+        Route::post('cap-nhat-bien-so-ban-xe', [VehicleSaleController::class, 'updatePlate'])
+            ->name('admin.vehicle_sales.update_plate')
+            ->middleware('module_permission:vehicle_sales,update');
+
+        Route::get('hoa-don-ban-xe/{sale}/in-hop-dong', [VehicleSaleController::class, 'print'])
+            ->name('admin.vehicle_sales.print')
+            ->middleware('module_permission:vehicle_sales,read');
 
 
-    }); // END check.login group
+        /*
+        |--------------------------------------------------------------------------
+        | BẢO MẬT (TIẾNG VIỆT)
+        |--------------------------------------------------------------------------
+        */
+        Route::get('bao-mat', [SecurityController::class, 'index'])
+            ->name('admin.security.index')
+            ->middleware('module_permission:security,read');
 
-}); // END admin prefix group
+        Route::get('bao-mat/du-lieu', [SecurityController::class, 'data'])
+            ->name('admin.security.data')
+            ->middleware('module_permission:security,read');
+
+        Route::post('bao-mat/go-chan', [SecurityController::class, 'unblock'])
+            ->name('admin.security.unblock')
+            ->middleware('module_permission:security,update');
+
+        Route::post('bao-mat/che-do-khan', [SecurityController::class, 'panic'])
+            ->name('admin.security.panic')
+            ->middleware('module_permission:security,update');
+
+    }); // END check.login
+
+}); // END admin prefix

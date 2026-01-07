@@ -277,7 +277,7 @@
                 </li>
             @endif
 
-            {{-- ===================== BLOG / TIN TỨC (nếu cần giữ) ===================== --}}
+            {{-- ===================== BLOG / TIN TỨC (nếu cần giữ) =====================
             @if(!empty($user->is_admin) && $user->is_admin)
                 <li class="{{ request()->routeIs('admin.category.*','admin.blog*','admin.major*') ? 'active' : '' }}">
                     <a href="#">
@@ -298,7 +298,7 @@
                         </li>
                     </ul>
                 </li>
-            @endif
+            @endif --}}
 
         </ul>
     </div>

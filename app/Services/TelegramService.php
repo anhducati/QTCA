@@ -4,24 +4,36 @@ namespace App\Services;
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 class TelegramService
 {
-        public static function send($message)
-        {
-            Http::post("https://api.telegram.org/bot".env('TELEGRAM_BOT_TOKEN')."/sendMessage", [
-                'chat_id' => env('TELEGRAM_CHAT_ID'),
-                'text' => $message,
-                'parse_mode' => 'HTML'
-            ]);
+    public static function send(string $message): void
+    {
+        try {
+            $token = env('TELEGRAM_BOT_TOKEN');
+            $chat  = env('TELEGRAM_CHAT_ID');
+
+            if (!$token || !$chat) return;
+
+            Http::connectTimeout(1)
+                ->timeout(2)
+                ->retry(2, 150)
+                ->asForm()
+                ->post("https://api.telegram.org/bot{$token}/sendMessage", [
+                    'chat_id' => $chat,
+                    'text' => $message,
+                    'parse_mode' => 'HTML',
+                    'disable_web_page_preview' => true,
+                ]);
+        } catch (\Throwable $e) {
+            Log::warning('[Telegram] send failed: '.$e->getMessage());
         }
+    }
 
-
-    // Gửi 1 lần trong X giây (chống spam)
-    public static function sendOnce($key, $message, $seconds = 300)
+    public static function sendOnce(string $key, string $message, int $seconds = 300): void
     {
         if (Cache::has($key)) return;
-
         Cache::put($key, true, $seconds);
         self::send($message);
     }

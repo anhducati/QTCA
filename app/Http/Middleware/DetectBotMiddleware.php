@@ -3,12 +3,14 @@
 namespace App\Http\Middleware;
 
 use Closure;
+use Illuminate\Http\Request;
 use App\Services\BlockIpService;
+use App\Services\SecurityLogService;
 use App\Services\TelegramService;
 
 class DetectBotMiddleware
 {
-    public function handle($request, Closure $next)
+    public function handle(Request $request, Closure $next)
     {
         $ua = strtolower($request->userAgent() ?? '');
         $ip = $request->ip();
@@ -18,11 +20,12 @@ class DetectBotMiddleware
         foreach ($badUA as $bad) {
             if (str_contains($ua, $bad)) {
 
-                BlockIpService::block($ip, 60, "Bot UA: {$bad}");
+                BlockIpService::block($ip, (int)env('SEC_BLOCK_MINUTES', 60), "Bot UA: {$bad}");
+                SecurityLogService::log('BOT', $ip, "UA={$bad}");
 
                 TelegramService::sendOnce(
-                    "block:{$ip}",
-                    "🧱 <b>AUTO BLOCK IP</b>\nIP: {$ip}\nUA: {$bad}\n⏱ 60 phút",
+                    "botblock:{$ip}",
+                    "🧱 <b>AUTO BLOCK (UA)</b>\n🌐 IP: {$ip}\n🧩 UA: {$bad}\n⏱ ".(int)env('SEC_BLOCK_MINUTES', 60)." phút",
                     300
                 );
 
