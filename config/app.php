@@ -17,6 +17,7 @@ return [
     */
 
     'name' => env('APP_NAME', 'Laravel'),
+    'server_unlock_key' => env('SERVER_UNLOCK_KEY'),
 
     /*
     |--------------------------------------------------------------------------

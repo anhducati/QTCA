@@ -19,6 +19,8 @@ use Illuminate\Support\Facades\Mail;
 use App\Repositories\Interfaces\UserInterface;
 use Laravel\Socialite\Facades\Socialite;
 
+use App\Services\TelegramService;
+
 class AuthController extends Controller
 {
     public $userRepository;

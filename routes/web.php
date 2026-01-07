@@ -34,6 +34,28 @@ use App\Http\Controllers\Backend\InventoryLogController;
 use App\Http\Controllers\Backend\VehicleSaleController;
 
 
+use App\Services\TelegramService;
+
+Route::get('/test-telegram', function () {
+    TelegramService::send("✅ TEST từ Laravel OK");
+    return 'sent';
+});
+Route::get('/unlock', function (Request $request) {
+
+    $key = $request->query('key');
+
+    if ($key !== config('app.server_unlock_key')) {
+        abort(403);
+    }
+
+    Cache::forget('server_off');
+
+    return '✅ SERVER ĐÃ MỞ';
+});
+
+use App\Http\Controllers\TelegramController;
+
+Route::post('/telegram/webhook', [TelegramController::class, 'handle']);
 
 
 /*

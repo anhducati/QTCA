@@ -14,14 +14,44 @@ class Kernel extends HttpKernel
      * @var array<int, class-string|string>
      */
     protected $middleware = [
-        // \App\Http\Middleware\TrustHosts::class,
+
+        // ===============================
+        // 1️⃣ HỆ THỐNG GỐC (Laravel)
+        // ===============================
         \App\Http\Middleware\TrustProxies::class,
         \Illuminate\Http\Middleware\HandleCors::class,
         \App\Http\Middleware\PreventRequestsDuringMaintenance::class,
         \Illuminate\Foundation\Http\Middleware\ValidatePostSize::class,
         \App\Http\Middleware\TrimStrings::class,
         \Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull::class,
+
+        // ===============================
+        // 2️⃣ CHẶN CỨNG – CHẠY ĐẦU TIÊN
+        // ===============================
+
+        // 🚨 PANIC MODE (OFF toàn site)
+        \App\Http\Middleware\PanicMiddleware::class,
+
+        // 🧱 BLOCK IP (tay + tự động)
+        \App\Http\Middleware\BlockIpMiddleware::class,
+
+        // 🔐 SERVER LOCK (off/on + unlock link)
+        \App\Http\Middleware\ServerLockMiddleware::class,
+
+        // ===============================
+        // 3️⃣ SECURITY MONITOR (SAU KHI QUA CỬA)
+        // ===============================
+
+        // 🤖 Detect bot / tool
+        \App\Http\Middleware\DetectBotMiddleware::class,
+
+        // 📊 Đếm traffic
+        \App\Http\Middleware\TrafficMonitorMiddleware::class,
+
+        // 🚨 Detect flood / scan / auto block
+        \App\Http\Middleware\DetectTraffic::class,
     ];
+
 
     /**
      * The application's route middleware groups.

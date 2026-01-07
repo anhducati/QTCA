@@ -6,7 +6,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title>Trường đại học Thủy Lợi</title>
+    <title>Chung Anh</title>
     <link rel="icon" href="{{asset('assets/client/img/logo_TLU.ico')}}">
 
     <link href="{{ asset('assets/backend/css/bootstrap.min.css') }}" rel="stylesheet">
